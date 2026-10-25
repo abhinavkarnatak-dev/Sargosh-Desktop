@@ -42,7 +42,7 @@ export class RecordingController {
       if (this.active !== active || active.ending) { capture.cancel(); return; }
       clearTimeout(active.openingTimer);
       active.capture = capture; active.openedAt = this.now(); active.lastSoundAt = active.openedAt;
-      this.update({ phase: active.accepted ? 'recording' : 'opening', message: active.accepted ? 'Listening. Your audio stays on this computer.' : 'Microphone ready. Recognizing your shortcut...' });
+      this.update({ phase: active.accepted ? 'recording' : 'opening', message: active.accepted ? 'Listening. Recording on this computer.' : 'Microphone ready. Recognizing your shortcut...' });
       active.timer = setInterval(() => {
         if (this.active !== active || active.ending || active.openedAt === undefined) return;
         const durationMs = Math.min(MAX_RECORDING_MS, Math.round(this.now() - active.openedAt));
@@ -59,7 +59,7 @@ export class RecordingController {
     const active = this.active;
     if (!active || active.id !== id || active.ending) return;
     active.accepted = true;
-    this.update({ mode, ...(active.capture ? { phase: 'recording', message: 'Listening. Your audio stays on this computer.' } : {}) });
+    this.update({ mode, ...(active.capture ? { phase: 'recording', message: 'Listening. Recording on this computer.' } : {}) });
   }
   async finish(id = this.state.sessionId): Promise<void> {
     const active = this.active;
@@ -79,7 +79,7 @@ export class RecordingController {
       if (this.active !== active) return;
       if (!blob.size) throw new Error('Empty audio');
       active.capture.cancel(); active.abort.abort(); this.active = undefined; this.clip = blob;
-      this.update({ phase: 'ready', clip: { bytes: blob.size, mimeType: blob.type }, message: 'Recording ready. Play it below. Transcription is not connected yet.' });
+      this.update({ phase: 'ready', clip: { bytes: blob.size, mimeType: blob.type }, message: 'Recording ready. Play it below or send it for transcription.' });
     } catch {
       this.fail(active.id, 'The final audio could not be collected. This clip was discarded. Try a new recording.');
     } finally { clearTimeout(timeout); }

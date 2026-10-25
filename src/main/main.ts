@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, powerMonitor, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { DesktopTranscriber } from './transcription';
+import { audioType, isRequestId, isSpeechLanguage, type TranscriptionRequest, type TranscriptionStatus } from '../shared/transcription';
 import { Helper } from './helper';
 import { INITIAL_RECORDING_STATE, MAX_AUDIO_BYTES, recordingBusy, type RecordingState } from '../shared/recording';
 import { INITIAL_WINDOWS_STATE, type WindowsState } from '../shared/windows';
@@ -15,6 +17,8 @@ let overlayWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let quitting = false;
 const helper = new Helper();
+const transcriber = new DesktopTranscriber();
+let transcriptionStatus: TranscriptionStatus = { phase: 'idle', message: '' };
 let recordingState: RecordingState = { ...INITIAL_RECORDING_STATE };
 let windowsState: WindowsState = { ...INITIAL_WINDOWS_STATE };
 function recordingUpdate(state: RecordingState) {
@@ -24,6 +28,9 @@ function recordingUpdate(state: RecordingState) {
   }
 }
 function stopOwner(message: string) {
+  transcriber.cancelAll();
+  transcriptionStatus = { phase: 'cancelled', message: 'Transcription cancelled.' };
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('sargosh:transcription-state', transcriptionStatus);
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sargosh:recording-command', 'cancel');
   void helper.call('windows.disarm').catch(() => {});
   recordingUpdate({ ...INITIAL_RECORDING_STATE, phase: 'failed', message });
@@ -86,6 +93,26 @@ if (ownsLock) {
     });
     handle('sargosh:windows-status', () => helper.call('windows.status'));
     handle('sargosh:recording-status', () => recordingState);
+    ipcMain.handle('sargosh:transcribe', (event, request: TranscriptionRequest) => {
+      checkSender(event);
+      if (event.sender !== mainWindow?.webContents || !request || !isRequestId(request.requestId) || !isSpeechLanguage(request.language) ||
+          !(request.audio instanceof ArrayBuffer) || !request.audio.byteLength || request.audio.byteLength > MAX_AUDIO_BYTES ||
+          typeof request.mimeType !== 'string' || !audioType(request.mimeType)) throw new Error('Invalid audio transcription request.');
+      return transcriber.transcribe(request);
+    });
+    ipcMain.handle('sargosh:transcription-cancel', (event, requestId: unknown) => {
+      checkSender(event);
+      if (event.sender !== mainWindow?.webContents || !isRequestId(requestId)) throw new Error('Invalid transcription cancellation.');
+      transcriber.cancel(requestId);
+    });
+    ipcMain.handle('sargosh:transcription-report', (event, value: TranscriptionStatus) => {
+      checkSender(event);
+      if (event.sender !== mainWindow?.webContents || !value || !['idle', 'working', 'completed', 'failed', 'cancelled'].includes(value.phase) || typeof value.message !== 'string' || value.message.length > 400) throw new Error('Invalid transcription status.');
+      transcriptionStatus = { phase: value.phase, message: value.message };
+      if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('sargosh:transcription-state', transcriptionStatus);
+    });
+    handle('sargosh:transcription-status', () => transcriptionStatus);
+
     ipcMain.handle('sargosh:recording-report', (event, value: RecordingState) => {
       checkSender(event);
       if (event.sender !== mainWindow?.webContents) throw new Error('Only the recording owner can publish audio state.');
@@ -155,4 +182,4 @@ if (ownsLock) {
   }).catch(error => { console.error(error); app.quit(); });
 }
 app.on('window-all-closed', () => { /* The tray owns the application lifetime. */ });
-app.on('before-quit', () => { quitting = true; helper.stop(); tray?.destroy(); });
+app.on('before-quit', () => { transcriber.cancelAll(); quitting = true; helper.stop(); tray?.destroy(); });

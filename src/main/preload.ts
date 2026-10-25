@@ -1,8 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { TranscriptionStatus } from '../shared/transcription';
 import type { RecordingState } from '../shared/recording';
 import type { WindowsState } from '../shared/windows';
 import type { DesktopBridge } from '../shared/types';
 const bridge: DesktopBridge = {
+  transcribeAudio: request => ipcRenderer.invoke('sargosh:transcribe', request),
+  cancelTranscription: requestId => ipcRenderer.invoke('sargosh:transcription-cancel', requestId),
+  reportTranscription: status => ipcRenderer.invoke('sargosh:transcription-report', status),
+  transcriptionStatus: () => ipcRenderer.invoke('sargosh:transcription-status'),
+  onTranscriptionState: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, status: TranscriptionStatus) => listener(status);
+    ipcRenderer.on('sargosh:transcription-state', handler);
+    return () => { ipcRenderer.removeListener('sargosh:transcription-state', handler); };
+  },
   startWindowsRecording: shortcut => ipcRenderer.invoke('sargosh:recording-start', shortcut),
   reportRecording: state => ipcRenderer.invoke('sargosh:recording-report', state),
   recordingStatus: () => ipcRenderer.invoke('sargosh:recording-status'),

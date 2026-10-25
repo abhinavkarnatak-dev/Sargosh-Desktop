@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { INITIAL_WINDOWS_STATE, type WindowsState } from '../src/shared/windows';
 import { DEFAULT_PREFERENCES } from '../src/shared/types';
 
-const fake = vi.hoisted(() => ({ open: vi.fn(), finish: vi.fn(), cancel: vi.fn() }));
+const fake = vi.hoisted(() => ({ open: vi.fn(), finish: vi.fn(), cancel: vi.fn(), transcribe: vi.fn() }));
+vi.mock('../src/renderer/audio/transcription-transport', () => ({ transcriptionTransport: fake.transcribe }));
 vi.mock('../src/renderer/audio/browser', () => ({ BrowserAudioBackend: class { open = fake.open; } }));
 const flush = async () => { for (let index = 0; index < 12; index++) await Promise.resolve(); };
 let runtime: typeof import('../src/renderer/audio/runtime');
@@ -16,11 +17,13 @@ let bridge: {
   windowsAction: ReturnType<typeof vi.fn>;
   snapshot: ReturnType<typeof vi.fn>;
   reportRecording: ReturnType<typeof vi.fn>;
+  reportTranscription: ReturnType<typeof vi.fn>;
 };
 beforeEach(async () => {
   vi.resetModules(); vi.useFakeTimers(); vi.clearAllMocks();
   fake.open.mockResolvedValue({ finish: fake.finish, cancel: fake.cancel });
   fake.finish.mockResolvedValue(new Blob(['actual clip'], { type: 'audio/webm' }));
+  fake.transcribe.mockResolvedValue({ text: 'Recognized text', language: 'en', model: 'nova-3', durationMs: 1000, confidence: .9 });
   native = { ...INITIAL_WINDOWS_STATE, enabled: true, purpose: 'recording' };
   bridge = {
     onWindowsState: vi.fn(listener => { nativeListener = listener; return () => {}; }),
@@ -31,7 +34,8 @@ beforeEach(async () => {
       nativeListener(native); return native;
     }),
     snapshot: vi.fn(async () => ({ preferences: DEFAULT_PREFERENCES })),
-    reportRecording: vi.fn(async () => {})
+    reportRecording: vi.fn(async () => {}),
+    reportTranscription: vi.fn(async () => {})
   };
   vi.stubGlobal('window', { sargosh: bridge, addEventListener: vi.fn() });
   runtime = await import('../src/renderer/audio/runtime');
@@ -74,4 +78,40 @@ describe('native shortcut to recording owner integration', () => {
     expect(bridge.windowsAction).toHaveBeenCalledWith('disarm');
     expect(runtime.recording.getState()).toMatchObject({ phase: 'recording', mode: 'manual' });
   });
+  it('automatically transcribes once only after final audio is ready', async () => {
+    let resolve!: (blob: Blob) => void;
+    fake.finish.mockReturnValueOnce(new Promise<Blob>(yes => { resolve = yes; }));
+    runtime.transcription.configure({ automatic: true });
+    speaking(); await flush(); commandListener('finish'); await flush();
+    expect(runtime.recording.getState().phase).toBe('finishing'); expect(fake.transcribe).not.toHaveBeenCalled();
+    resolve(new Blob(['complete clip'], { type: 'audio/webm' })); await flush();
+    expect(fake.transcribe).toHaveBeenCalledOnce();
+    expect(runtime.transcription.getState()).toMatchObject({ phase: 'completed', result: { text: 'Recognized text' } });
+  });
+  it('keeps automatic upload off unless the user enables it', async () => {
+    speaking(); await flush(); commandListener('finish'); await flush();
+    expect(runtime.recording.getState().phase).toBe('ready'); expect(fake.transcribe).not.toHaveBeenCalled();
+  });
+  it('discarding a clip cancels its transcription and ignores the late response', async () => {
+    let resolve!: (result: unknown) => void;
+    fake.transcribe.mockReturnValueOnce(new Promise(yes => { resolve = yes; }));
+    speaking(); await flush(); commandListener('finish'); await flush();
+    const pending = runtime.transcribeRecording(); await flush();
+    const signal = fake.transcribe.mock.calls[0][3] as AbortSignal;
+    runtime.recording.clear(); expect(signal.aborted).toBe(true);
+    resolve({ text: 'Late result', language: 'en', model: 'nova-3', durationMs: 1000, confidence: .9 }); await pending;
+    expect(runtime.transcription.getState()).toMatchObject({ phase: 'idle', result: null });
+  });
+  it('does not start another microphone session while transcription is running', async () => {
+    let resolve!: (result: unknown) => void;
+    fake.transcribe.mockReturnValueOnce(new Promise(yes => { resolve = yes; }));
+    speaking(); await flush(); commandListener('finish'); await flush();
+    const pending = runtime.transcribeRecording(); await flush();
+    native = { ...native, revision: native.revision + 1, phase: 'pending', sessionId: 'next' };
+    nativeListener(native); await flush();
+    expect(fake.open).toHaveBeenCalledOnce(); expect(bridge.windowsAction).toHaveBeenCalledWith('cancel');
+    resolve({ text: 'First result', language: 'en', model: 'nova-3', durationMs: 1000, confidence: .9 }); await pending;
+    expect(runtime.transcription.getState().result?.text).toBe('First result');
+  });
+
 });

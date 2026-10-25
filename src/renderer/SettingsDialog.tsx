@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Info, Monitor, Moon, Settings, Sun, User, X } from 'lucide-react';
 import type { Preferences, RuntimeStatus, Theme } from '../shared/types';
-import { useRecording } from './audio/runtime';
+import { STT_LANGUAGES, isSpeechLanguage } from '../shared/transcription';
+import { transcription, useTranscription, useRecording } from './audio/runtime';
 import { recordingBusy } from '../shared/recording';
 import { MicrophoneTest } from './MicrophoneTest';
 import { WindowsTestPanel } from './WindowsTestPanel';
 export function SettingsDialog({ preferences, runtime, onSave, onClose }: { preferences: Preferences; runtime: RuntimeStatus; onSave(update: Partial<Preferences>): Promise<void>; onClose(): void }) {
   const recordingState = useRecording();
+  const speech = useTranscription();
   const [tab, setTab] = useState<'general' | 'account'>('general');
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [details, setDetails] = useState<'shortcuts' | 'languages' | null>(null);
@@ -26,7 +28,7 @@ export function SettingsDialog({ preferences, runtime, onSave, onClose }: { pref
           {details === 'shortcuts' && <WindowsTestPanel shortcut={preferences.shortcut} onShortcut={value => onSave({ shortcut: value })} />}
           <div className="setting-row"><div><strong>Microphone</strong><p>Choose the input Sargosh should use.</p></div><select aria-label="Microphone" value={preferences.microphoneId} onChange={event => void onSave({ microphoneId: event.target.value })}><option value="default">Windows default</option>{devices.filter(device => device.deviceId !== 'default' && device.deviceId !== 'communications' && device.deviceId).map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || 'Microphone ' + (index + 1)}</option>)}</select></div>
           <div className="setting-row"><div><strong>My languages</strong><p>Languages used for speech recognition.</p></div><button className="button secondary" onClick={() => setDetails(details === 'languages' ? null : 'languages')}>View<ChevronRight size={14} /></button></div>
-          {details === 'languages' && <div className="inline-detail"><Info size={16} /><p>Language choices will be available when Deepgram is connected. Only languages supported by the selected model will appear.</p></div>}
+          {details === 'languages' && <div className="inline-detail"><Info size={16} /><div><label htmlFor="settings-speech-language">Deepgram speech language</label><select id="settings-speech-language" value={speech.language} disabled={recordingBusy(recordingState) || speech.phase === 'working'} onChange={event => { if (isSpeechLanguage(event.target.value)) transcription.configure({ language: event.target.value }); }}>{STT_LANGUAGES.map(language => <option key={language.value} value={language.value}>{language.label}</option>)}</select><p>Mixed speech uses Nova-3 multilingual. This does not translate or romanize the transcript.</p></div></div>}
           <div className="setting-row"><div><strong>Theme</strong><p>Choose how Sargosh looks.</p></div><div className="theme-picker" role="group" aria-label="Theme">{([{ value: 'system', Icon: Monitor, label: 'System' }, { value: 'light', Icon: Sun, label: 'Light' }, { value: 'dark', Icon: Moon, label: 'Dark' }] as const).map(({ value, Icon, label }) => <button key={value} className={preferences.theme === value ? 'selected' : ''} aria-pressed={preferences.theme === value} onClick={() => void onSave({ theme: value as Theme })}><Icon size={15} />{label}</button>)}</div></div>
         </div>
         <MicrophoneTest disabled={recordingBusy(recordingState)} microphoneId={preferences.microphoneId} onDevices={setDevices} />

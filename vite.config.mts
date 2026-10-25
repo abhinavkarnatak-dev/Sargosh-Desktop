@@ -10,7 +10,7 @@ export default defineConfig(({ command }) => {
       name: 'sargosh-development-csp', apply: 'serve',
       transformIndexHtml: { order: 'post', handler: html => html.replace("script-src 'self'", "script-src 'self' 'nonce-" + nonce + "'") }
     }],
-    server: { host: '127.0.0.1', port: 5173, strictPort: true },
+    server: { host: '127.0.0.1', port: 5173, strictPort: true, proxy: { '/api': { target: 'http://127.0.0.1:4318', rewrite: requestPath => requestPath.replace(/^\/api/, '') } } },
     build: { outDir: '../../dist/renderer', emptyOutDir: true }
   };
 });

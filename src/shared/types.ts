@@ -1,3 +1,4 @@
+import type { TranscriptionRequest, Transcript, TranscriptionStatus } from './transcription';
 import type { RecordingState } from './recording';
 import type { WindowsState } from './windows';
 export type Theme = 'system' | 'light' | 'dark';
@@ -7,6 +8,11 @@ export interface DayActivity { date: string; words: number }
 export interface Snapshot { preferences: Preferences; history: HistoryEntry[]; activity: DayActivity[]; totalWords: number; recordingCount: number; totalDurationMs: number }
 export interface RuntimeStatus { desktop: boolean; helper: boolean; api: boolean; auth: boolean; stt: boolean; cleanup: boolean }
 export interface DesktopBridge {
+  transcribeAudio(request: TranscriptionRequest): Promise<{ ok: true; result: Transcript } | { ok: false; code: string; message: string }>;
+  cancelTranscription(requestId: string): Promise<void>;
+  reportTranscription(status: TranscriptionStatus): Promise<void>;
+  transcriptionStatus(): Promise<TranscriptionStatus>;
+  onTranscriptionState(listener: (status: TranscriptionStatus) => void): () => void;
   startWindowsRecording(shortcut: string): Promise<WindowsState>;
   reportRecording(state: RecordingState): Promise<void>;
   recordingStatus(): Promise<RecordingState>;

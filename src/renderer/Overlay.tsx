@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, GripVertical, Mic, X } from 'lucide-react';
+import type { TranscriptionStatus } from '../shared/transcription';
 import { INITIAL_RECORDING_STATE, recordingBusy, type RecordingState } from '../shared/recording';
 import { INITIAL_WINDOWS_STATE, type WindowsState } from '../shared/windows';
 export function Overlay() {
   const [expanded, setExpanded] = useState(false);
   const [state, setState] = useState<WindowsState>(INITIAL_WINDOWS_STATE);
   const [audio, setAudio] = useState<RecordingState>(INITIAL_RECORDING_STATE);
+  const [speech, setSpeech] = useState<TranscriptionStatus>({ phase: 'idle', message: '' });
   const drag = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
     if (!window.sargosh) return;
@@ -21,6 +23,13 @@ export function Overlay() {
     void window.sargosh.recordingStatus().then(update).catch(() => {});
     return unsubscribe;
   }, []);
+  useEffect(() => {
+    if (!window.sargosh) return;
+    const unsubscribe = window.sargosh.onTranscriptionState(setSpeech);
+    void window.sargosh.transcriptionStatus().then(setSpeech).catch(() => {});
+    return unsubscribe;
+  }, []);
+  const cloudActive = speech.phase === 'working';
   const audioActive = recordingBusy(audio);
   const active = state.enabled && ['pending', 'listening'].includes(state.phase);
   async function action(value: 'cancel' | 'finish' | 'start-hands-free') {
@@ -28,8 +37,8 @@ export function Overlay() {
     catch { setState(current => ({ ...current, enabled: false, phase: 'failed', message: 'Windows input test is unavailable. Open Sargosh to restart it.' })); }
   }
   return <div className="overlay-stage">
-    <div className={(expanded || active || audioActive ? 'overlay-pill expanded' : 'overlay-pill') + (audioActive ? ' recording-active' : active ? ' input-test-active' : '')} onMouseEnter={() => setExpanded(true)} onMouseLeave={() => { if (!drag.current) setExpanded(false); }}>
-      {audioActive ? <>
+    <div className={(expanded || active || audioActive || cloudActive ? 'overlay-pill expanded' : 'overlay-pill') + (audioActive || cloudActive ? ' recording-active' : active ? ' input-test-active' : '')} onMouseEnter={() => setExpanded(true)} onMouseLeave={() => { if (!drag.current) setExpanded(false); }}>
+      {cloudActive ? <><button className="overlay-mic" aria-label="Cancel transcription" title="Cancel transcription" onClick={() => void window.sargosh?.recordingAction('cancel').catch(() => {})}><X size={15} /></button><span className="overlay-recording-status">Transcribing...</span></> : audioActive ? <>
         <button className="overlay-mic" aria-label="Cancel recording" title="Cancel" onClick={() => void window.sargosh?.recordingAction('cancel').catch(() => {})}><X size={15} /></button>
         {audio.phase === 'recording' ? <span className="overlay-wave" role="img" aria-label={audio.quiet ? 'No microphone activity' : 'Listening'} title={audio.quiet ? 'No microphone activity. Check your mic.' : 'Listening - ' + state.shortcut}>{[.35,.65,.85,1,.85,.65,.35].map((weight, index) => <i key={index} style={{ height: Math.max(3, audio.level * .24 * weight) + 'px' }} />)}</span> : <span className="overlay-recording-status">{audio.phase === 'opening' ? 'Starting...' : 'Finishing...'}</span>}
         {audio.mode !== 'hold' && <button className="overlay-mic" aria-label="Finish recording" title={'Press ' + state.shortcut + ' to finish recording'} disabled={audio.phase === 'finishing'} onClick={() => void window.sargosh?.recordingAction('finish').catch(() => {})}><Check size={15} /></button>}
