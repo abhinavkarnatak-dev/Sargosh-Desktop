@@ -17,12 +17,38 @@ class StoreTests(unittest.TestCase):
     def entry(self, status='completed'):
         return {'id': 'recording-a', 'createdAt': '2026-10-25T12:00:00Z', 'text': 'Hello world', 'words': 2, 'durationMs': 2000, 'status': status}
 
+    def test_old_database_is_migrated_without_losing_history_or_preferences(self):
+        import sqlite3
+        legacy_path = Path(self.directory.name) / 'legacy.sqlite3'
+        database = sqlite3.connect(legacy_path)
+        database.executescript('CREATE TABLE preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE history (id TEXT PRIMARY KEY, createdAt TEXT NOT NULL, text TEXT NOT NULL, words INTEGER NOT NULL, durationMs INTEGER NOT NULL, status TEXT NOT NULL, error TEXT); CREATE TABLE metrics (id TEXT PRIMARY KEY, day TEXT NOT NULL, words INTEGER NOT NULL, durationMs INTEGER NOT NULL);')
+        database.execute('INSERT INTO preferences VALUES (?, ?)', ('theme', '"dark"'))
+        database.execute('INSERT INTO history VALUES (?, ?, ?, ?, ?, ?, ?)', ('old', '2026-10-25T12:00:00Z', 'Old words', 2, 1000, 'completed', None))
+        database.commit(); database.close()
+        migrated = Store(legacy_path)
+        try:
+            state = migrated.snapshot()
+            self.assertEqual(state['preferences']['theme'], 'dark')
+            self.assertEqual(state['history'][0]['text'], 'Old words')
+            self.assertEqual(state['history'][0]['audioBytes'], 0)
+        finally:
+            migrated.db.close()
+
+    def test_late_history_update_does_not_recreate_a_deleted_record(self):
+        self.store.add(self.entry(), '2026-10-25')
+        self.store.handle('delete', {'id': 'recording-a'})
+        result = self.store.handle('history.update', {'entry': {**self.entry(), 'originalText': 'Raw', 'language': 'en', 'cleanupEnabled': True}, 'day': '2026-10-25'})
+        self.assertIsNone(result)
+        self.assertEqual(self.store.snapshot()['history'], [])
+        self.assertEqual(self.store.snapshot()['totalWords'], 2)
+
     def test_preferences_survive_restart(self):
-        self.store.preferences({'theme': 'dark', 'collapsed': True})
+        self.store.preferences({'theme': 'dark', 'collapsed': True, 'shortcut': 'Control+Alt+K'})
         self.store.db.close()
         self.store = Store(self.path)
         self.assertEqual(self.store.preferences()['theme'], 'dark')
         self.assertTrue(self.store.preferences()['collapsed'])
+        self.assertEqual(self.store.preferences()['shortcut'], 'Control+Alt+K')
 
     def test_retries_do_not_duplicate_statistics(self):
         self.store.add(self.entry(), '2026-10-25')

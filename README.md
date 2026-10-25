@@ -2,19 +2,20 @@
 
 Sargosh is a Windows dictation companion designed to turn natural speech into text in the apps you use. Its interface brings together a floating dictation control, a local recording history, and simple usage insights.
 
-The source provides a Windows desktop workspace with light and dark themes, a floating recording control, local audio playback, Deepgram transcription, and optional Gemini Flash-Lite cleanup. An opt-in Windows input test checks clipboard-free delivery of a fixed sentence. Finished desktop dictations can insert text directly into the saved input without using the clipboard. Account sign-in and persistent completed-dictation history are not available in this build.
+The source provides a Windows desktop workspace with light and dark themes, a floating recording control, local audio playback, Deepgram transcription, and optional Gemini Flash-Lite cleanup. An opt-in Windows input test checks clipboard-free delivery of a fixed sentence. Finished desktop dictations can insert text directly into the saved input without using the clipboard. Finished recordings and transcripts are saved locally and remain after restart. Account sign-in is not available in this build.
 
 ## Using the desktop workspace
 
 - The top bar holds the sidebar toggle, a Light/Dark/System theme menu, and native Windows minimize, maximize, and close controls. Its empty area can be dragged to move the window, and its colors follow the app theme. The theme button uses the native window-control bounds to keep a small gap beside Minimize at different display scales.
+- The rounded page frame stays fixed while its content scrolls. Scrollbars are hidden; mouse-wheel, touchpad, and keyboard scrolling remain available.
 - The sidebar expands smoothly with fading labels. Its logo and navigation icons stay aligned, with Settings anchored at the bottom.
-- **Dictation** is the home for transcripts and original recordings once dictation is connected.
+- **Dictation** shows saved transcripts and original recordings, grouped by day.
 - **Insights** shows total words, recording count, average words per minute, and daily activity. A day's tooltip contains only its date and word count.
 - **Settings** contains theme and microphone preferences and a microphone test. While Settings is open, the background stays still and cannot be interacted with. Click outside the dialog, press Escape, or use its close button to return.
 - The tray icon reopens Sargosh. Closing the main window hides it; choose **Quit Sargosh** from the tray menu to exit.
 - The floating pill expands on hover. Its microphone button opens the main app until recording shortcuts are enabled; it then starts hands-free recording. The grip moves the control. After you finish speaking, the control keeps the audio dots and shows a small loader on their right while your text is prepared. It does not display processing-stage names or cancel buttons during this step. Microphone warnings, no-speech results, and cancellation messages appear in a dismissible card above the pill. A card that opens Sargosh or microphone settings closes when that action succeeds; the pill stays visible. If text cannot be inserted, the card shows the prepared text and a Copy button.
 - The microphone level test processes sound levels on your computer. It does not save or upload audio.
-- **Check your recording** captures a temporary local clip with start, finish, cancel, playback, and discard controls.
+- **Check your recording** captures audio with start, finish, cancel, playback, and clear-preview controls. Finishing saves the original recording locally in the desktop app.
 
 ## Run from source
 
@@ -77,7 +78,7 @@ Microphone access starts when you begin a recording, including the brief shortcu
 
 Each session is limited to 5 minutes and 25 MiB. No microphone activity for several seconds produces a level warning, not a speech-recognition result. Permission failures, a disconnected microphone, empty output, and audio finalization timeouts are reported without uploading or retrying the audio. Changing the selected microphone applies to the next recording.
 
-Only the latest finished clip is kept in memory. A new recording replaces it; **Discard audio**, a page reload, or app exit removes it. These clips are not written to SQLite or counted in Insights. They are sent to Deepgram only when you request transcription or enable automatic transcription; enabled cleanup sends the recognized transcript text to Gemini, not the audio. Desktop recording sessions retain their saved input for direct transcript delivery. Recording mode does not insert the fixed test sentence.
+The current preview stays in memory, while finished desktop recordings are saved to local audio files and SQLite history. A new recording or **Clear preview** replaces only the preview; saved history remains until you delete it. Cancellation before finishing discards the recording. Finished audio is saved before automatic transcription starts, so it can be retried after a cloud failure. Browser-preview clips stay in memory and are not saved to desktop history. Audio is sent to Deepgram only when you request transcription or enable automatic transcription; enabled cleanup sends transcript text to Gemini. Recording mode does not insert the fixed test sentence.
 
 The main renderer owns one microphone and recorder. The overlay receives state and sends commands through Electron; it never opens a second recorder. On Windows, a small native mouse-activation hook lets its buttons receive clicks without taking keyboard focus from your input. The overlay Cancel button stops an active recording. Processing can still be cancelled from the main recording panel. Finish stops microphone capture immediately and waits for both the final audio and the saved destination before making the clip available. If a control cannot reach the recording window, the overlay shows a restart message. The main renderer's background timer throttling is disabled so hiding it does not suspend recording controls. Reloading the owner, losing Windows input access, or putting the computer to sleep cancels active recording and disarms shortcuts.
 
@@ -91,7 +92,7 @@ The flow is recording > final audio chunk > local Fastify API > Deepgram > trans
 
 Wait for transcription and any enabled cleanup to finish, or cancel the current stage, before starting another recording. Cancellation aborts the local request and ignores any late response; it cannot undo processing or charges already incurred at the provider. Failures leave the clip available for an explicit retry. The app does not automatically retry paid calls. **Transcribe again** starts a new request and may consume credits. Empty results are shown as no speech recognized rather than fabricated text. The provider request times out after 60 seconds; the local client also has a deadline.
 
-Audio and transcript previews stay in memory until replaced, discarded, reloaded, or closed. For exact duplicate request IDs, the local API keeps at most 32 successful response entries for 5 minutes to prevent duplicate provider calls. It does not write audio or transcripts to disk or request logs. Deepgram receives the audio and processes it under its own data policies; requests set `mip_opt_out=true` to opt out of the Model Improvement Program. See [Deepgram's data policy](https://developers.deepgram.com/trust-security/your-data).
+The latest audio and transcript preview stays in memory; completed desktop recordings are also retained in local history. For exact duplicate request IDs, the local API keeps at most 32 successful response entries for 5 minutes to prevent duplicate provider calls. The backend does not write audio or transcripts to disk or request logs; the desktop app retains its local history separately. Deepgram receives the audio and processes it under its own data policies; requests set `mip_opt_out=true` to opt out of the Model Improvement Program. See [Deepgram's data policy](https://developers.deepgram.com/trust-security/your-data).
 
 The transcript is displayed as text and can optionally be cleaned with Gemini. Automatic insertion into the remembered Windows input and saving completed dictations to history are separate integrations. This local development bridge must be replaced by authenticated account access and usage allowances before public deployment. Never ship private provider credentials inside the installer.
 
@@ -107,9 +108,9 @@ The cleaned text appears above an expandable **Original Deepgram transcript**. Y
 
 If Gemini is unavailable, blocked, rate-limited, times out, or returns incomplete or invalid JSON, the original transcript stays available. Cleanup edits can still be mistaken; compare with the original when accuracy matters. Input is limited to 24,000 characters, provider requests time out after 20 seconds, and the local client has a separate deadline. Output is schema-validated and length-bounded. No partially generated result is used.
 
-The local API checks its session token, bounds request size and concurrency, and keeps at most 32 successful cleanup responses in memory for 5 minutes to avoid duplicate calls for identical request IDs. Transcript text and cleaned text are not saved to disk or request logs. Google receives the transcript and language hint; its data-use rules depend on the project and billing tier. Review [Gemini API terms](https://ai.google.dev/gemini-api/terms) and [Gemini pricing and data-use information](https://ai.google.dev/gemini-api/docs/pricing).
+The local API checks its session token, bounds request size and concurrency, and keeps at most 32 successful cleanup responses in memory for 5 minutes to avoid duplicate calls for identical request IDs. The backend does not save transcript text or cleaned text to disk or request logs; the desktop app stores these in its local history. Google receives the transcript and language hint; its data-use rules depend on the project and billing tier. Review [Gemini API terms](https://ai.google.dev/gemini-api/terms) and [Gemini pricing and data-use information](https://ai.google.dev/gemini-api/docs/pricing).
 
-Cleanup produces text; a separate Windows delivery step inserts it into the saved input. Completed dictations are not yet saved to history. Local previews are removed when replaced, discarded, reloaded, or closed, while the bounded backend deduplication caches expire independently.
+Cleanup produces text; a separate Windows delivery step inserts it into the saved input. Completed desktop dictations are saved to local history. Local previews are removed when replaced, discarded, reloaded, or closed, while the bounded backend deduplication caches expire independently.
 
 ## Insert into a Windows textbox
 
@@ -125,9 +126,25 @@ Every recording permits one insertion attempt. Repeated completion events, **Cle
 
 Password fields, read-only fields, closed windows, and unavailable or hidden controls are excluded. Switching focus, holding keyboard modifiers, or changing keyboard layout during insertion stops it to avoid typing into another field. Some editors and background browser tabs do not expose a usable Windows input control. A clear result appears in the main panel and the transcript remains available. Windows also restricts delivery between apps running with different permissions.
 
+## Local history and audio
+
+Every finished desktop recording appears in **Your dictations**, grouped under Today, Yesterday, or its local calendar date. The time is on the left, the transcript is in the middle, and Play, Copy, and the three-dot menu are on the right. Hover over a row or move keyboard focus into it to reveal its controls. **Load older dictations** retrieves older pages without discarding recordings.
+
+**Play audio** plays the original saved recording. **Copy transcript** copies the currently saved text and shows a bottom-right confirmation with a gentle fade and slide. Copy, deletion, and audio-export confirmations share this bottom-right style, have no close button, and disappear automatically after two seconds. They respect reduced-motion preferences. The menu contains exactly **Retry transcript**, **Delete transcript**, and **Extract audio**. Extract opens a Windows Save dialog and saves the original bytes in their recorded format, such as WebM/Opus. It does not convert the audio to MP3 or another format.
+
+Retry uploads that entry's original audio to Deepgram, uses its saved language and cleanup choice, and updates the same entry. It may use provider credits. It does not insert text into another app again. Failed retries preserve an existing successful transcript. If the first attempt failed, the retained recording can be retried later. Cancelled or silent recordings do not earn word statistics until a successful nonempty transcript is saved.
+
+Delete asks for confirmation and removes both the transcript and original audio. Click outside the confirmation to dismiss it without deleting. It does not remove text already inserted into other apps. Accumulated word totals and activity stay unchanged. Each recording contributes to total words, recording count, WPM, and the local-day activity calendar once, using its first successful prepared transcript; retries never count it twice.
+
+Metadata, original transcript, final text, language, and metrics are stored in SQLite. Original audio is stored as separate files. Development data lives in `.local/development/history.sqlite3` and `.local/development/recordings/` and is excluded from Git. Installed builds use Electron's per-user app data directory. These are ordinary local files, not encrypted cloud backups. No history is uploaded to a storage service; recognition and explicit retries still transmit audio and enabled cleanup transmits text to their providers.
+
+History writes are serialized, partially written files are cleaned up on startup, and interrupted deletions are recovered. Existing databases are upgraded without replacing preferences or older entries. Older entries without an original audio file can still be copied or deleted. Saving failures are reported in the recording panel while the current preview remains available. Quitting waits for history writes already received by the desktop coordinator to finish.
+
 ## Check Windows input behavior
 
-In the Electron app, open **Settings > General > Shortcuts > View**. The development-only Windows input test lets you select a shortcut, start the hook, observe a session, and insert the fixed sentence **Sargosh input test.** after finishing.
+To change the dictation shortcut, open **Settings > General > Shortcuts > View**, choose **Change shortcut**, then press and release a supported combination. It saves automatically to local preferences. Enabled shortcuts pause during editing and resume with the saved combination. Cancel or close Settings to keep the previous combination. Finish any current dictation or text processing before changing shortcuts.
+
+The standalone Windows input test can check the hook, observe a session, and insert the fixed sentence **Sargosh input test.** after finishing.
 
 The default combination is **Control + Alt + Space**. Hold and release it for push-to-talk. Double-tap it to start hands-free, then double-tap again to finish. A short single tap is ignored. The detector reserves a brief interval to distinguish a hold from two taps. This test does not start the microphone or any paid service.
 
@@ -165,6 +182,6 @@ npm test
 npm run build
 ```
 
-The tests cover lifecycle cancellation, late results, destination freezing, duplicate completion, insights calculations, local SQLite persistence, API readiness behavior, shortcut timing, protected fields, target changes, Unicode input layout, delivery guards, final audio chunk ordering, recording cancellation races, repeated hold/hands-free recording sessions, microphone disconnection, recording limits, transcription cancellation and stale responses, provider errors, binary audio uploads, request deduplication, local API access controls, transcription rate limits, structured cleanup validation, cleanup cancellation and late responses, preservation of the original transcript on failure, and cleanup retries without another transcription.
+The tests cover lifecycle cancellation, late results, destination freezing, duplicate completion, insights calculations, local SQLite persistence, API readiness behavior, shortcut timing, protected fields, target changes, Unicode input layout, delivery guards, final audio chunk ordering, recording cancellation races, repeated hold/hands-free recording sessions, microphone disconnection, recording limits, transcription cancellation and stale responses, provider errors, binary audio uploads, request deduplication, local API access controls, transcription rate limits, structured cleanup validation, cleanup cancellation and late responses, preservation of the original transcript on failure, cleanup retries without another transcription, saved audio recovery, history paging, retry counts, audio export, and history menu controls.
 
 Electron Forge configuration is included for Windows packaging. This source build currently requires local Python; a self-contained Windows helper must be bundled before distributing an installer. Signing and public distribution are separate from running the source locally.

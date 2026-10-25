@@ -292,3 +292,30 @@ it('publishes no-speech feedback without inventing recovery text', async () => {
   expect(bridge.reportTranscription.mock.lastCall?.[0].notice).toMatchObject({ title: 'No speech detected' });
   expect(bridge.reportTranscription.mock.lastCall?.[0].notice.text).toBeUndefined();
 });
+
+it('saves a finalized clip before automatic transcription and remembers its prepared text', async () => {
+  const saveHistory = vi.fn(async () => {}); const updateHistory = vi.fn(async () => {});
+  Object.assign(bridge, { saveHistory, updateHistory });
+  const arrayBuffer = vi.spyOn(Blob.prototype, 'arrayBuffer').mockResolvedValue(new ArrayBuffer(11));
+  try {
+    runtime.transcription.configure({ automatic: true }); speaking(); await flush(); commandListener('finish'); await flush(); await flush();
+    expect(saveHistory).toHaveBeenCalledOnce(); expect(updateHistory).toHaveBeenCalledWith(expect.objectContaining({ id: 'session', text: 'Cleaned text', originalText: 'Recognized text', status: 'completed' }));
+    expect(saveHistory.mock.invocationCallOrder[0]).toBeLessThan(fake.transcribe.mock.invocationCallOrder[0]);
+  } finally { arrayBuffer.mockRestore(); }
+});
+it('does not save a recording cancelled before finalization', async () => {
+  const saveHistory = vi.fn(async () => {}); Object.assign(bridge, { saveHistory });
+  speaking(); await flush(); commandListener('cancel'); await flush(); expect(saveHistory).not.toHaveBeenCalled();
+});
+
+it('keeps the pipeline busy while saving and respects cancellation before cloud processing starts', async () => {
+  let save!: () => void; const saveHistory = vi.fn(() => new Promise<void>(resolve => { save = resolve; }));
+  Object.assign(bridge, { saveHistory, updateHistory: vi.fn(async () => {}) });
+  const arrayBuffer = vi.spyOn(Blob.prototype, 'arrayBuffer').mockResolvedValue(new ArrayBuffer(11));
+  try {
+    runtime.transcription.configure({ automatic: true }); speaking(); await flush(); commandListener('finish'); await flush();
+    expect(runtime.cloudBusy()).toBe(true); expect(fake.transcribe).not.toHaveBeenCalled();
+    commandListener('cancel'); save(); await flush(); await flush();
+    expect(fake.transcribe).not.toHaveBeenCalled(); expect(runtime.transcription.getState().phase).toBe('cancelled'); expect(runtime.cloudBusy()).toBe(false);
+  } finally { arrayBuffer.mockRestore(); }
+});

@@ -1,3 +1,4 @@
+import { useSavedHistory } from './audio/history';
 import { ThemedSelect } from './ThemedSelect';
 import { useEffect, useState } from 'react';
 import { Copy, Mic, Square, Trash2, X } from 'lucide-react';
@@ -11,6 +12,7 @@ export function RecordingPanel({ preferences }: { preferences: Preferences }) {
   const state = useRecording();
   const speech = useTranscription();
   const clean = useCleanup();
+  const archive = useSavedHistory();
   const insertion = useDelivery();
   const inserting = insertion.phase === 'working';
   const cleaning = clean.phase === 'working';
@@ -21,7 +23,7 @@ export function RecordingPanel({ preferences }: { preferences: Preferences }) {
   const [error, setError] = useState('');
   const [audioURL, setAudioURL] = useState('');
   const busy = recordingBusy(state);
-  const processing = busy || transcribing || cleaning || inserting;
+  const processing = busy || transcribing || cleaning || inserting || archive.retryingId !== null;
   const armed = native.enabled && native.purpose === 'recording';
   const blob = recording.getClip();
   useEffect(() => {
@@ -65,11 +67,12 @@ export function RecordingPanel({ preferences }: { preferences: Preferences }) {
     <div className="meter" role="meter" aria-label="Recording microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={state.level}><span style={{ width: state.level + '%' }} /></div>
     <p className={state.phase === 'failed' ? 'error-message' : 'inline-help'}>{state.message}</p>
     {state.quiet && <p className="recording-quiet" role="status">No microphone activity detected. Check that your mic is not muted.</p>}
-    {audioURL && <div className="recording-preview"><audio controls src={audioURL} aria-label="Latest local recording" /><button className="button secondary" onClick={() => recording.clear()}><Trash2 size={14} />Discard audio</button><span>{Math.round((state.clip?.bytes || 0) / 1024)} KB - {state.clip?.mimeType}</span></div>}
-    {state.phase === 'ready' && state.clip && <div className="transcription-actions"><button className="button" disabled={transcribing || cleaning || inserting} onClick={() => void transcribeRecording()}>{transcribing ? 'Transcribing...' : speech.phase === 'completed' ? 'Transcribe again' : 'Transcribe recording'}</button>{transcribing && <button className="button secondary" onClick={() => transcription.cancel()}>Cancel transcription</button>}</div>}
+    {audioURL && <div className="recording-preview"><audio controls src={audioURL} aria-label="Latest local recording" /><button className="button secondary" onClick={() => recording.clear()}><Trash2 size={14} />Clear preview</button><span>{Math.round((state.clip?.bytes || 0) / 1024)} KB - {state.clip?.mimeType}</span></div>}
+    {state.phase === 'ready' && state.clip && <div className="transcription-actions"><button className="button" disabled={processing} onClick={() => void transcribeRecording()}>{transcribing ? 'Transcribing...' : speech.phase === 'completed' ? 'Transcribe again' : 'Transcribe recording'}</button>{transcribing && <button className="button secondary" onClick={() => transcription.cancel()}>Cancel transcription</button>}</div>}
     {speech.phase !== 'idle' && <section className="transcript-panel" aria-label="Deepgram transcript"><div role="status"><strong>{cleaning ? 'Cleaning with Gemini' : speech.phase === 'working' ? 'Transcribing' : speech.phase === 'completed' ? clean.result ? 'Cleaned text' : 'Deepgram transcript' : speech.phase === 'cancelled' ? 'Transcription cancelled' : 'Transcription unavailable'}</strong><p className={speech.phase === 'failed' ? 'error-message' : 'inline-help'}>{speech.message}</p></div>{clean.phase !== 'idle' && <p className={clean.phase === 'failed' ? 'error-message' : 'inline-help'} role="status">{clean.message}</p>}{speech.result?.text && <><p className="transcript-text">{outputText}</p><button className="button secondary" disabled={cleaning || inserting || !outputText} onClick={() => void navigator.clipboard.writeText(outputText).then(() => setError(''), () => setError('Could not copy the transcript.'))}><Copy size={14} />Copy {clean.result ? 'cleaned text' : 'transcript'}</button><div className="transcription-actions"><button className="button secondary" disabled={processing} onClick={() => void cleanupTranscript()}>{clean.result ? 'Clean up again' : clean.phase === 'failed' || clean.phase === 'cancelled' ? 'Retry cleanup' : 'Clean up transcript'}</button>{cleaning && <button className="button secondary" onClick={() => cleanup.cancel()}>Cancel cleanup</button>}</div>{clean.phase !== 'idle' && <details className="original-transcript"><summary>Original Deepgram transcript</summary><p className="transcript-text">{speech.result.text}</p><button className="button secondary" onClick={() => void navigator.clipboard.writeText(speech.result!.text).catch(() => setError('Could not copy the original transcript.'))}>Copy original</button></details>}</>}</section>}
     {insertion.phase !== 'idle' && <div role="status" className={insertion.phase === 'failed' ? 'error-message' : 'inline-help'}><p>{insertion.message}</p>{inserting && <button className="button secondary" onClick={() => delivery.cancel()}>Stop insertion</button>}</div>}
+    {archive.error && <p className="error-message" role="alert">{archive.error}</p>}
     {error && <p className="error-message" role="alert">{error}</p>}
-    <p className="recording-footnote">Up to 5 minutes. The preview stays in memory until you replace it, discard it, or close the app. Audio and transcripts are not added to dictation history. Cloud transcription sends audio to Deepgram; enabled cleanup sends transcript text to Google Gemini. These calls use the provider quotas or credits; retries happen only when you request them.</p>
+    <p className="recording-footnote">Up to 5 minutes. The preview stays in memory until you replace it, discard it, or close the app. Finished recordings are saved to local history in the desktop app. Cloud transcription sends audio to Deepgram; enabled cleanup sends transcript text to Google Gemini. These calls use the provider quotas or credits; retries happen only when you request them.</p>
   </section>;
 }

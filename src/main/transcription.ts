@@ -5,6 +5,7 @@ import { LocalApiError } from '../shared/local-api';
 export type TranscriptionReply = { ok: true; result: Transcript } | { ok: false; code: string; message: string };
 export class DesktopTranscriber {
   private active = new Map<string, AbortController>();
+  get busy() { return this.active.size > 0; }
   async transcribe(request: TranscriptionRequest): Promise<TranscriptionReply> {
     if (this.active.size) return { ok: false, code: 'BUSY', message: 'A transcription is already running.' };
     const abort = new AbortController(); this.active.set(request.requestId, abort);

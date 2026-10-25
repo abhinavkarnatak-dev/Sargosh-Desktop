@@ -23,6 +23,11 @@ class Store:
         CREATE TABLE IF NOT EXISTS metrics (
             id TEXT PRIMARY KEY, day TEXT NOT NULL, words INTEGER NOT NULL, durationMs INTEGER NOT NULL);
         """)
+        columns = {row['name'] for row in self.db.execute('PRAGMA table_info(history)')}
+        for name, definition in {'originalText': "TEXT NOT NULL DEFAULT ''", 'language': "TEXT NOT NULL DEFAULT 'en'", 'cleanupEnabled': 'INTEGER NOT NULL DEFAULT 1', 'audioMimeType': "TEXT NOT NULL DEFAULT ''", 'audioBytes': 'INTEGER NOT NULL DEFAULT 0'}.items():
+            if name not in columns:
+                self.db.execute(f'ALTER TABLE history ADD COLUMN {name} {definition}')
+        self.db.commit()
 
     def preferences(self, update=None):
         if update is not None:
@@ -48,7 +53,7 @@ class Store:
         totals = self.db.execute('SELECT COALESCE(SUM(words), 0) words, COALESCE(SUM(durationMs), 0) duration, COUNT(*) count FROM metrics').fetchone()
         return {
             'preferences': self.preferences(),
-            'history': [dict(row) for row in self.db.execute('SELECT * FROM history ORDER BY createdAt DESC LIMIT 200')],
+            'history': [self.history_row(row) for row in self.db.execute('SELECT * FROM history ORDER BY createdAt DESC, id DESC LIMIT 50')],
             'activity': [dict(row) for row in self.db.execute('SELECT day date, SUM(words) words FROM metrics GROUP BY day ORDER BY day')],
             'totalWords': totals['words'], 'recordingCount': totals['count'], 'totalDurationMs': totals['duration']
         }
@@ -56,13 +61,45 @@ class Store:
     def add(self, entry, day):
         # Retries update history, but cannot count another recording or alter earned metrics.
         with self.db:
-            self.db.execute('INSERT OR REPLACE INTO history VALUES (:id, :createdAt, :text, :words, :durationMs, :status, :error)', {**entry, 'error': entry.get('error')})
+            self.db.execute('INSERT OR REPLACE INTO history (id, createdAt, text, words, durationMs, status, error) VALUES (:id, :createdAt, :text, :words, :durationMs, :status, :error)', {**entry, 'error': entry.get('error')})
             if entry['status'] == 'completed':
                 self.db.execute('INSERT OR IGNORE INTO metrics VALUES (?, ?, ?, ?)', (entry['id'], day, entry['words'], entry['durationMs']))
+
+    def history_get(self, recording_id):
+        row = self.db.execute('SELECT * FROM history WHERE id = ?', (recording_id,)).fetchone()
+        return self.history_row(row) if row else None
+
+    def history_row(self, row):
+        result = dict(row)
+        result['cleanupEnabled'] = bool(result['cleanupEnabled'])
+        return result
+
+    def history_page(self, cursor=None):
+        if cursor:
+            rows = self.db.execute('SELECT * FROM history WHERE createdAt < ? OR (createdAt = ? AND id < ?) ORDER BY createdAt DESC, id DESC LIMIT 51', (cursor['createdAt'], cursor['createdAt'], cursor['id'])).fetchall()
+        else:
+            rows = self.db.execute('SELECT * FROM history ORDER BY createdAt DESC, id DESC LIMIT 51').fetchall()
+        return {'entries': [self.history_row(row) for row in rows[:50]], 'hasMore': len(rows) > 50}
 
     def handle(self, method, params):
         if method == 'ping': return {'ready': True, 'platform': sys.platform, 'capabilities': ['preferences', 'history', 'insights']}
         if method == 'snapshot': return self.snapshot()
+        if method == 'history.get': return self.history_get(params['id'])
+        if method == 'history.list': return self.history_page(params.get('cursor'))
+        if method == 'history.create':
+            entry = params['entry']
+            with self.db:
+                self.db.execute('INSERT OR IGNORE INTO history (id, createdAt, text, words, durationMs, status, error, originalText, language, cleanupEnabled, audioMimeType, audioBytes) VALUES (:id, :createdAt, :text, :words, :durationMs, :status, :error, :originalText, :language, :cleanupEnabled, :audioMimeType, :audioBytes)', entry)
+            return self.history_get(entry['id'])
+        if method == 'history.update':
+            entry = params['entry']
+            with self.db:
+                current = self.history_get(entry['id'])
+                if not current: return None
+                self.db.execute('UPDATE history SET text=:text, words=:words, status=:status, error=:error, originalText=:originalText, language=:language, cleanupEnabled=:cleanupEnabled WHERE id=:id', entry)
+                if entry['status'] == 'completed' and entry['words'] > 0:
+                    self.db.execute('INSERT OR IGNORE INTO metrics VALUES (?, ?, ?, ?)', (entry['id'], params['day'], entry['words'], current['durationMs']))
+            return self.history_get(entry['id'])
         if method == 'preferences': return self.preferences(params)
         if method == 'delete':
             with self.db: self.db.execute('DELETE FROM history WHERE id = ?', (params['id'],))
@@ -93,7 +130,8 @@ def main():
     for line in sys.stdin:
         request = {}
         try:
-            if len(line) > 65536: raise ValueError('Request too large')
+            # A history update can contain two escaped 24,000-character transcripts.
+            if len(line) > 512 * 1024: raise ValueError('Request too large')
             request = json.loads(line)
             method = request['method']
             params = request.get('params', {})

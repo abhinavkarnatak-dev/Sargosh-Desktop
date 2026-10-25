@@ -50,3 +50,20 @@ it('sends only a resolved light or dark theme to the native title bar', async ()
   await bridge.setWindowTheme('dark');
   expect(electron.invoke).toHaveBeenCalledWith('sargosh:window-theme', 'dark');
 });
+
+it('routes history actions through named channels and releases its update listener', async () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const capture = { id, audio: new ArrayBuffer(4), mimeType: 'audio/webm', language: 'en' as const, cleanupEnabled: true };
+  const result = { id, text: 'Hello.', originalText: 'hello', language: 'en' as const, cleanupEnabled: true, status: 'completed' as const };
+  await bridge.saveHistory(capture); await bridge.updateHistory(result);
+  await bridge.listHistory({ id, createdAt: '2026-10-26T10:00:00.000Z' });
+  await bridge.historyAudio(id); await bridge.retryHistory(id); await bridge.extractHistoryAudio(id); await bridge.copyHistoryText(id); await bridge.deleteEntry(id);
+  expect(electron.invoke.mock.calls).toEqual([
+    ['sargosh:history-save', capture], ['sargosh:history-update', result],
+    ['sargosh:history-list', { id, createdAt: '2026-10-26T10:00:00.000Z' }],
+    ['sargosh:history-audio', id], ['sargosh:history-retry', id], ['sargosh:history-extract', id], ['sargosh:history-copy', id], ['sargosh:delete', id]
+  ]);
+  const changed = vi.fn(); const release = bridge.onHistoryChanged(changed);
+  const handler = electron.on.mock.calls[0][1]; handler(); expect(changed).toHaveBeenCalledOnce();
+  release(); expect(electron.remove).toHaveBeenCalledWith('sargosh:history-changed', handler);
+});

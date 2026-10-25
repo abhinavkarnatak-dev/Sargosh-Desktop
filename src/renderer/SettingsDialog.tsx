@@ -1,3 +1,4 @@
+import { useModalDialog } from './modal';
 import { ThemedSelect } from './ThemedSelect';
 import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Info, Monitor, Moon, Settings, Sun, User, X } from 'lucide-react';
@@ -6,7 +7,7 @@ import { STT_LANGUAGES, isSpeechLanguage } from '../shared/transcription';
 import { transcription, useCleanup, useTranscription, useRecording } from './audio/runtime';
 import { recordingBusy } from '../shared/recording';
 import { MicrophoneTest } from './MicrophoneTest';
-import { WindowsTestPanel } from './WindowsTestPanel';
+import { ShortcutEditor } from './ShortcutEditor';
 export function SettingsDialog({ preferences, onSave, onClose }: { preferences: Preferences; onSave(update: Partial<Preferences>): Promise<void>; onClose(): void }) {
   const recordingState = useRecording();
   const speech = useTranscription();
@@ -20,22 +21,9 @@ export function SettingsDialog({ preferences, onSave, onClose }: { preferences: 
     const bounds = element.getBoundingClientRect();
     return x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom;
   }
+  useModalDialog(dialog);
   useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    // showModal supplies the focus trap and makes the background inert.
-    element.showModal();
-    const scrollingElements = [document.documentElement, document.body];
-    const previous = scrollingElements.map(node => ({ node, value: node.style.getPropertyValue('overflow'), priority: node.style.getPropertyPriority('overflow') }));
-    scrollingElements.forEach(node => node.style.setProperty('overflow', 'hidden', 'important'));
     void navigator.mediaDevices?.enumerateDevices().then(items => setDevices(items.filter(item => item.kind === 'audioinput'))).catch(() => {});
-    return () => {
-      element.close();
-      for (const { node, value, priority } of previous) {
-        if (value) node.style.setProperty('overflow', value, priority);
-        else node.style.removeProperty('overflow');
-      }
-    };
   }, []);
   return <dialog ref={dialog} className="settings-dialog" onCancel={event => { event.preventDefault(); onClose(); }} aria-labelledby="settings-title" onPointerDown={event => {
     outsidePress.current = event.target === event.currentTarget && outside(event.currentTarget, event.clientX, event.clientY);
@@ -49,8 +37,8 @@ export function SettingsDialog({ preferences, onSave, onClose }: { preferences: 
       {tab === 'general' ? <>
         <p className="eyebrow">MAKE IT YOURS</p><h2>General</h2><p className="subtitle">A few preferences for a more comfortable flow.</p>
         <div className="settings-card">
-          <div className="setting-row"><div><strong>Shortcuts</strong><p>Hold to talk or double-tap for hands-free.</p></div><button className="button secondary" onClick={() => setDetails(details === 'shortcuts' ? null : 'shortcuts')}>View<ChevronRight size={14} /></button></div>
-          {details === 'shortcuts' && <WindowsTestPanel shortcut={preferences.shortcut} onShortcut={value => onSave({ shortcut: value })} />}
+          <div className="setting-row"><div><strong>Shortcuts</strong><p>{preferences.shortcut.split('+').join(' + ')}</p></div><button className="button secondary" onClick={() => setDetails(details === 'shortcuts' ? null : 'shortcuts')}>View<ChevronRight size={14} /></button></div>
+          {details === 'shortcuts' && <ShortcutEditor shortcut={preferences.shortcut} onSave={value => onSave({ shortcut: value })} />}
           <div className="setting-row"><div><strong>Microphone</strong><p>Choose the input Sargosh should use.</p></div><ThemedSelect label="Microphone" value={preferences.microphoneId} placeholder="Unavailable microphone" options={[{ value: 'default', label: 'Windows default' }, ...devices.filter(device => device.deviceId !== 'default' && device.deviceId !== 'communications' && device.deviceId).map((device, index) => ({ value: device.deviceId, label: device.label || 'Microphone ' + (index + 1) }))]} onChange={value => void onSave({ microphoneId: value })} /></div>
           <div className="setting-row"><div><strong>My languages</strong><p>Languages used for speech recognition.</p></div><button className="button secondary" onClick={() => setDetails(details === 'languages' ? null : 'languages')}>View<ChevronRight size={14} /></button></div>
           {details === 'languages' && <div className="inline-detail"><Info size={16} /><div><label htmlFor="settings-speech-language">Deepgram speech language</label><ThemedSelect id="settings-speech-language" value={speech.language} disabled={recordingBusy(recordingState) || speech.phase === 'working' || clean.phase === 'working'} options={STT_LANGUAGES} onChange={value => { if (isSpeechLanguage(value)) transcription.configure({ language: value }); }} /><p>Mixed speech uses Nova-3 multilingual. This does not translate or romanize the transcript.</p></div></div>}

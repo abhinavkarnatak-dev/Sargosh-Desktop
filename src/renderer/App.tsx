@@ -1,6 +1,8 @@
+import { NoticeToast } from './NoticeToast';
+import { HistoryList } from './HistoryList';
 import { ThemeMenu } from './ThemeMenu';
-import { useCallback, useEffect, useState } from 'react';
-import { BarChart3, Check, ChevronRight, Copy, Mic, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Play, Settings, ShieldCheck, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { BarChart3, Mic, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react';
 import { EMPTY_SNAPSHOT, type Preferences, type Snapshot } from '../shared/types';
 import { wordsPerMinute } from '../shared/insights';
 import { RecordingPanel } from './RecordingPanel';
@@ -12,15 +14,17 @@ export function App() {
   const [page, setPage] = useState<'dictation' | 'insights'>('dictation');
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
   const [settings, setSettings] = useState(false);
-  const [notice, setNotice] = useState('');
-  const [menu, setMenu] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [notice, updateNotice] = useState({ message: '', id: 0 });
+  const setNotice = useCallback((message: string) => updateNotice(current => ({ message, id: current.id + 1 })), []);
+  const dismissNotice = useCallback(() => setNotice(''), [setNotice]);
+  const refreshGeneration = useRef(0);
   const refresh = useCallback(async () => {
     if (!window.sargosh) return;
-    try { setSnapshot(await window.sargosh.snapshot()); }
+    const generation = ++refreshGeneration.current;
+    try { const next = await window.sargosh.snapshot(); if (generation === refreshGeneration.current) setSnapshot(next); }
     catch { setNotice('Local history could not be opened. Check that the Python helper is running.'); }
-  }, []);
-  useEffect(() => { void refresh(); }, [refresh]);
+  }, [setNotice]);
+  useEffect(() => { void refresh(); return window.sargosh?.onHistoryChanged?.(() => { void refresh(); }); }, [refresh]);
   useEffect(() => window.sargosh?.onOpenSettings?.(() => setSettings(true)), []);
   useEffect(() => {
     const query = window.matchMedia('(prefers-color-scheme: dark)');
@@ -32,17 +36,15 @@ export function App() {
     apply(); query.addEventListener('change', apply);
     return () => query.removeEventListener('change', apply);
   }, [snapshot.preferences.theme]);
-  useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 7000); return () => clearTimeout(timer); }, [notice]);
   async function savePreferences(update: Partial<Preferences>) {
     try {
       if (!window.sargosh) { setSnapshot(current => ({ ...current, preferences: { ...current.preferences, ...update } })); return; }
       const preferences = await window.sargosh.preferences(update);
       setSnapshot(current => ({ ...current, preferences }));
-    } catch { setNotice('Your preference could not be saved. Please try again.'); }
-  }
-  async function removeEntry() {
-    if (!deleting || !window.sargosh) return;
-    try { await window.sargosh.deleteEntry(deleting); setDeleting(null); await refresh(); } catch { setNotice('The recording could not be deleted.'); }
+    } catch {
+      setNotice('Your preference could not be saved. Please try again.');
+      if (update.shortcut !== undefined) throw new Error('Shortcut could not be saved. Please try again.');
+    }
   }
   useEffect(() => { setRecordingPreferences(snapshot.preferences); }, [snapshot.preferences]);
   const collapsed = snapshot.preferences.collapsed;
@@ -66,7 +68,7 @@ export function App() {
       </div>
     </aside>
     <main className="main-surface">
-
+      <div className="main-scroll" tabIndex={0} aria-label="Page content">
       <div className="page-content">
         {page === 'dictation' ? <>
           <div className="page-heading"><div><p className="eyebrow">DICTATION</p><h1>Welcome to Sargosh</h1><p className="subtitle">Speak naturally. Make room for your thoughts.</p></div></div>
@@ -75,23 +77,13 @@ export function App() {
             <section className="dictation-stat"><BarChart3 size={19} strokeWidth={1.5} /><div><span className="stat-number">{wordsPerMinute(snapshot.totalWords, snapshot.totalDurationMs)}<small>wpm</small></span><span className="stat-label">average dictation speed</span></div></section>
           </div>
           <RecordingPanel preferences={snapshot.preferences} />
-          <section className="history-section" aria-labelledby="history-heading">
-            <div className="section-heading"><h2 id="history-heading">Your dictations</h2><span><ShieldCheck size={13} /> Stored locally</span></div>
-            {!snapshot.history.length ? <div className="empty-history"><div className="empty-icon"><Mic size={25} strokeWidth={1.5} /></div><h3>Your first words belong here.</h3><p>Once dictation is connected, your recordings and<br className="desktop-break" /> transcribed text will appear in this space.</p><button className="text-button" onClick={() => setSettings(true)}>Check your microphone <ChevronRight size={15} /></button></div> :
-            <div className="history-list">{snapshot.history.map(entry => <article className="history-entry" key={entry.id}>
-              <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</time>
-              <p>{entry.text || entry.error || 'No transcript available.'}</p><div className="history-actions">
-              <button className="icon-button" aria-label="Play recording" disabled title="Audio playback will be connected with recording"><Play size={16} /></button>
-              <button className="icon-button" aria-label="Copy transcript" disabled={!entry.text} onClick={() => void navigator.clipboard.writeText(entry.text).then(() => setNotice('Transcript copied.'), () => setNotice('Could not copy the transcript.'))}><Copy size={16} /></button>
-              <div className="menu-wrap"><button className="icon-button" aria-label="Recording options" aria-expanded={menu === entry.id} onClick={() => setMenu(menu === entry.id ? null : entry.id)}><MoreHorizontal size={18} /></button>{menu === entry.id && <div className="context-menu"><button disabled title="Cloud transcription is not connected">Retry transcription</button><button className="danger-text" onClick={() => { setMenu(null); setDeleting(entry.id); }}><Trash2 size={14} />Delete</button></div>}</div>
-              </div></article>)}</div>}
-          </section>
+          <HistoryList onNotice={setNotice} />
         </> : <Insights snapshot={snapshot} />}
         <footer className="page-footer"><span>Speak freely. Stay in your flow.</span><span>SARGOSH</span></footer>
       </div>
+      </div>
     </main>
     {settings && <SettingsDialog preferences={snapshot.preferences} onSave={savePreferences} onClose={() => setSettings(false)} />}
-    {notice && <div className="toast" role="status"><Check size={16} /><span>{notice}</span><button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice('')}><X size={15} /></button></div>}
-    {deleting && <div className="modal-backdrop"><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><h2 id="delete-title">Delete this dictation?</h2><p>This removes the entry from local history. Your accumulated insights stay unchanged.</p><div className="dialog-actions"><button className="button secondary" onClick={() => setDeleting(null)}>Keep dictation</button><button className="button danger" onClick={() => void removeEntry()}>Delete</button></div></section></div>}
+    {notice.message && <NoticeToast key={notice.id} message={notice.message} onDismiss={dismissNotice} />}
   </div></div>;
 }

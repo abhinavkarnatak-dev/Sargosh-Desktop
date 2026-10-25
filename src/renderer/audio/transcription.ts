@@ -24,6 +24,10 @@ export class TranscriptionController {
       this.update({ phase: abort.signal.aborted ? 'cancelled' : 'failed', message: abort.signal.aborted ? 'Transcription cancelled.' : error instanceof Error ? error.message : 'Transcription failed. The clip is still available.' });
     }
   }
+  cancelPreparation(sessionId: string) {
+    if (this.active) return;
+    this.update({ phase: 'cancelled', sessionId, result: null, message: 'Dictation cancelled. The finished recording remains in local history.' });
+  }
   cancel() {
     if (!this.active) return;
     const active = this.active; this.active = undefined; active.abort();

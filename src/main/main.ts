@@ -1,8 +1,11 @@
+import { retrySavedTranscript } from './history-retry';
+import { LocalHistory } from './history';
+import { isHistoryId, type HistoryCapture, type HistoryResult } from '../shared/history';
 import { titleBarAppearance } from './titlebar';
 import { recoveryTextForCopy, validOverlayNotice } from '../shared/overlay-notice';
 import { resizeOverlayBounds } from './overlay-bounds';
 import { deliveryTimeout, validDeliveryRequest, type DeliveryResult } from '../shared/delivery';
-import { app, clipboard, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
+import { app, clipboard, dialog, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { RecordingCommands } from './recording-commands';
 import { enableOverlayInput } from './overlay-input';
@@ -24,6 +27,9 @@ let overlayWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let quitting = false;
 let activeDelivery: string | null = null;
+let history: LocalHistory | undefined;
+let historyRetry: string | null = null;
+const finishedRecordings = new Map<string, { createdAt: string; durationMs: number; bytes: number; mimeType: string }>();
 const helper = new Helper();
 const transcriber = new DesktopTranscriber();
 const recordingCommands = new RecordingCommands();
@@ -94,7 +100,44 @@ if (ownsLock) {
       callback(trustedURL(contents.getURL()) && permission === 'media' && mediaTypes.length > 0 && mediaTypes.every(type => type === 'audio'));
     });
     session.defaultSession.setPermissionCheckHandler((contents, permission, origin) => permission === 'media' && Boolean(contents) && trustedURL(contents!.getURL()) && trustedURL(origin));
-    try { await helper.start(root, path.join(root, '.local', 'development')); } catch { console.error('Python helper did not start. Check your Python installation.'); }
+    const dataDirectory = dev ? path.join(root, '.local', 'development') : app.getPath('userData');
+    try { await helper.start(root, dataDirectory); } catch { console.error('Python helper did not start. Check your Python installation.'); }
+    history = new LocalHistory(path.join(dataDirectory, 'recordings'), helper, () => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sargosh:history-changed');
+    });
+    await history.initialize().catch(() => console.error('Local recording history could not be opened.'));
+    function ownerHandle(channel: string, work: (value: any) => unknown) {
+      ipcMain.handle(channel, (event, value) => { checkSender(event); if (event.sender !== mainWindow?.webContents || quitting) throw new Error('History is unavailable.'); return work(value); });
+    }
+    ownerHandle('sargosh:history-save', async (request: HistoryCapture) => {
+      const metadata = request && finishedRecordings.get(request.id);
+      if (!metadata || !request.audio || request.audio.byteLength !== metadata.bytes || request.mimeType !== metadata.mimeType) throw new Error('Invalid finished recording.');
+      await history!.capture(request, { createdAt: metadata.createdAt, durationMs: metadata.durationMs });
+    });
+    ownerHandle('sargosh:history-update', (request: HistoryResult) => history!.update(request));
+    ownerHandle('sargosh:history-list', cursor => history!.list(cursor));
+    ownerHandle('sargosh:history-audio', id => history!.audio(id));
+    ownerHandle('sargosh:history-copy', async (id: string) => { const entry = await history!.get(id); if (!entry?.text) throw new Error('No transcript available.'); clipboard.writeText(entry.text); });
+    ownerHandle('sargosh:history-extract', async (id: string) => {
+      const entry = await history!.get(id); if (!entry?.audioMimeType || !entry.audioBytes) throw new Error('Original audio is unavailable.');
+      const extension = ({ 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/wav': 'wav', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a' } as Record<string, string>)[audioType(entry.audioMimeType) ?? ''];
+      if (!extension) throw new Error('Unsupported recording format.');
+      const result = await dialog.showSaveDialog(mainWindow!, { title: 'Extract original audio', defaultPath: 'Sargosh-' + entry.createdAt.replace(/[:.]/g, '-') + '.' + extension, filters: [{ name: 'Original audio', extensions: [extension] }] });
+      if (result.canceled || !result.filePath) return false;
+      await history!.exportAudio(id, result.filePath); return true;
+    });
+    ownerHandle('sargosh:history-retry', async (id: string) => {
+      if (historyRetry || activeDelivery || transcriber.busy || transcriptionStatus.phase === 'working' || recordingBusy(recordingState) || ['pending', 'listening'].includes(windowsState.phase)) throw new Error('Finish the current dictation first.');
+      if (!isHistoryId(id)) throw new Error('Invalid recording.');
+      historyRetry = id;
+      try {
+        await helper.call('windows.set-busy', { busy: true });
+        await retrySavedTranscript(id, history!, transcriber);
+      } finally {
+        historyRetry = null;
+        void helper.call('windows.set-busy', { busy: ['working'].includes(transcriptionStatus.phase) }).catch(() => {});
+      }
+    });
     helper.onEvent((event, data) => {
       if (event === 'helper.unavailable') { stopOwner('Windows input access stopped. Recording cancelled. Restart Sargosh.'); return; }
       if (event !== 'windows.state') return;
@@ -110,12 +153,14 @@ if (ownsLock) {
       if (event.sender !== mainWindow?.webContents || !request || !isRequestId(request.requestId) || !isSpeechLanguage(request.language) ||
           !(request.audio instanceof ArrayBuffer) || !request.audio.byteLength || request.audio.byteLength > MAX_AUDIO_BYTES ||
           typeof request.mimeType !== 'string' || !audioType(request.mimeType)) throw new Error('Invalid audio transcription request.');
+      if (historyRetry) return { ok: false, code: 'BUSY', message: 'Wait for the transcript retry to finish.' };
       return transcriber.transcribe(request);
     });
     ipcMain.handle('sargosh:cleanup', (event, request: CleanupRequest) => {
       checkSender(event);
       if (event.sender !== mainWindow?.webContents || !request || !isRequestId(request.requestId) || !isSpeechLanguage(request.language) ||
           typeof request.text !== 'string' || !request.text.trim() || request.text.length > MAX_CLEANUP_CHARS) throw new Error('Invalid cleanup request.');
+      if (historyRetry) return { ok: false, code: 'BUSY', message: 'Wait for the transcript retry to finish.' };
       return transcriber.cleanup(request);
     });
     ipcMain.handle('sargosh:transcription-cancel', (event, requestId: unknown) => {
@@ -128,7 +173,7 @@ if (ownsLock) {
       if (event.sender !== mainWindow?.webContents || !value || !['idle', 'working', 'completed', 'failed', 'cancelled'].includes(value.phase) || typeof value.message !== 'string' || value.message.length > 400) throw new Error('Invalid transcription status.');
       if (value.notice !== undefined && !validOverlayNotice(value.notice)) throw new Error('Invalid overlay notice.');
       transcriptionStatus = { phase: value.phase, message: value.message, ...(value.notice ? { notice: value.notice } : {}) };
-      void helper.call('windows.set-busy', { busy: value.phase === 'working' }).catch(() => {});
+      void helper.call('windows.set-busy', { busy: value.phase === 'working' || historyRetry !== null }).catch(() => {});
       if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('sargosh:transcription-state', transcriptionStatus);
     });
     handle('sargosh:transcription-status', () => transcriptionStatus);
@@ -144,6 +189,10 @@ if (ownsLock) {
           ![null, 'hold', 'hands-free', 'manual'].includes(value.mode) || typeof value.quiet !== 'boolean' ||
           (value.clip !== null && (!Number.isFinite(value.clip.bytes) || value.clip.bytes < 0 || value.clip.bytes > MAX_AUDIO_BYTES || typeof value.clip.mimeType !== 'string' || value.clip.mimeType.length > 100))) {
         throw new Error('Invalid recording state.');
+      }
+      if (value.phase === 'ready' && value.clip && isHistoryId(value.sessionId) && !finishedRecordings.has(value.sessionId)) {
+        finishedRecordings.set(value.sessionId, { createdAt: new Date(Date.now() - value.durationMs).toISOString(), durationMs: value.durationMs, bytes: value.clip.bytes, mimeType: value.clip.mimeType });
+        if (finishedRecordings.size > 32) finishedRecordings.delete(finishedRecordings.keys().next().value!);
       }
       recordingUpdate({ revision: 0, phase: value.phase, sessionId: value.sessionId, mode: value.mode,
         durationMs: value.durationMs, level: value.level, quiet: value.quiet, message: value.message,
@@ -181,18 +230,19 @@ if (ownsLock) {
       if (activeDelivery === sessionId) await helper.call('windows.cancel-delivery', { sessionId });
     });
     handle('sargosh:recording-start', (shortcut: unknown) => {
-      if (activeDelivery || recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Finish recording before changing shortcuts.');
+      if (historyRetry || activeDelivery || recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Finish recording before changing shortcuts.');
       const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
       return helper.call('windows.arm', { shortcut, ignoredProcessIds, purpose: 'recording' });
     });
     powerMonitor.on('suspend', () => stopOwner('The computer went to sleep. Any active recording was discarded.'));
 
     handle('sargosh:windows-start', (shortcut: unknown) => {
-      if (activeDelivery || recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || !dev || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Invalid Windows test request.');
+      if (historyRetry || activeDelivery || recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || !dev || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Invalid Windows test request.');
       const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
       return helper.call('windows.arm', { shortcut, ignoredProcessIds });
     });
     handle('sargosh:windows-action', (action: unknown) => {
+      if (action === 'start-hands-free' && historyRetry) throw new Error('Wait for the transcript retry to finish.');
       if (!dev || !['cancel', 'finish', 'start-hands-free', 'disarm'].includes(String(action))) throw new Error('Invalid Windows test action.');
       return helper.call('windows.' + action);
     });
@@ -202,9 +252,9 @@ if (ownsLock) {
     });
     handle('sargosh:snapshot', () => helper.call('snapshot'));
     handle('sargosh:preferences', (update: Partial<Preferences>) => helper.call('preferences', update));
-    handle('sargosh:delete', (id: unknown) => {
-      if (typeof id !== 'string' || id.length > 100) throw new Error('Invalid history entry.');
-      return helper.call('delete', { id });
+    ownerHandle('sargosh:delete', (id: string) => {
+      if (historyRetry === id) throw new Error('Wait for this transcript retry to finish.');
+      return history!.remove(id);
     });
     ipcMain.handle('sargosh:overlay-copy', (event, id: unknown) => {
       checkSender(event);
@@ -246,4 +296,9 @@ if (ownsLock) {
   }).catch(error => { console.error(error); app.quit(); });
 }
 app.on('window-all-closed', () => { /* The tray owns the application lifetime. */ });
-app.on('before-quit', () => { recordingCommands.cancelAll(); transcriber.cancelAll(); quitting = true; helper.stop(); tray?.destroy(); });
+app.on('before-quit', event => {
+  if (quitting) { tray?.destroy(); return; }
+  event.preventDefault(); quitting = true;
+  recordingCommands.cancelAll(); transcriber.cancelAll();
+  void Promise.resolve(history?.drain()).catch(() => {}).then(() => helper.stop()).finally(() => app.quit());
+});

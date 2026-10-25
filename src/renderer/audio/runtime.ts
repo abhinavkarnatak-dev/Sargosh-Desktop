@@ -1,3 +1,4 @@
+import { savedHistory } from './history';
 import { DeliveryController, deliveryTransport } from './delivery';
 import { useSyncExternalStore } from 'react';
 import { DEFAULT_PREFERENCES, type Preferences } from '../../shared/types';
@@ -17,13 +18,18 @@ let initialized = false;
 let activeBefore = false;
 let sourceSession: string | null = null;
 let automaticSession: string | null = null;
+let savingForTranscription: string | null = null;
 let cleanupSource: Transcript | null = null;
 let recovery: { sessionId: string; text: string; id: string } | null = null;
 export const delivery = new DeliveryController(deliveryTransport);
 export const useDelivery = () => useSyncExternalStore(delivery.subscribe, delivery.getState);
 export const cleanup = new CleanupController(cleanupTransport);
 export const useCleanup = () => useSyncExternalStore(cleanup.subscribe, cleanup.getState);
-export const cloudBusy = () => transcription.getState().phase === 'working' || cleanup.getState().phase === 'working' || delivery.getState().phase === 'working';
+export const cloudBusy = () => transcription.getState().phase === 'working' || cleanup.getState().phase === 'working' || delivery.getState().phase === 'working' || savingForTranscription !== null || savedHistory.getState().retryingId !== null;
+export async function retryHistory(id: string) {
+  if (recordingBusy(recording.getState()) || cloudBusy()) throw new Error('Finish the current dictation first.');
+  await savedHistory.retry(id);
+}
 export async function cleanupTranscript() {
   const state = transcription.getState();
   if (state.phase === 'completed' && state.sessionId && state.result && !cloudBusy()) await cleanup.start(state.sessionId, state.result.text, state.result.language);
@@ -52,6 +58,8 @@ export async function finishRecording() {
   } else await recording.finish();
 }
 export function cancelRecording() {
+  const preparing = savingForTranscription; savingForTranscription = null;
+  if (preparing) transcription.cancelPreparation(preparing);
   delivery.cancel();
   cleanup.cancel();
   transcription.cancel();
@@ -75,11 +83,21 @@ export function initializeRecording() {
   initialized = true;
   recording.subscribe(() => {
     const state = recording.getState();
-    if (state.sessionId !== sourceSession) { sourceSession = state.sessionId; recovery = null; delivery.clear(); transcription.clear(); }
+    if (state.sessionId !== sourceSession) { sourceSession = state.sessionId; savingForTranscription = null; recovery = null; delivery.clear(); transcription.clear(); }
     if (['idle', 'cancelled', 'failed'].includes(state.phase)) { delivery.clear(); transcription.clear(); }
     void window.sargosh?.reportRecording(state).catch(() => {});
-    if (state.phase === 'ready' && state.sessionId && transcription.getState().automatic && automaticSession !== state.sessionId) {
-      automaticSession = state.sessionId; void transcribeRecording();
+    if (state.phase === 'ready' && state.sessionId && recording.getClip()) {
+      const id = state.sessionId;
+      const saved = savedHistory.capture(id, recording.getClip()!, transcription.getState().language, cleanup.getState().enabled);
+      if (transcription.getState().automatic && automaticSession !== id) {
+        automaticSession = id; savingForTranscription = id; reportCloud();
+        void saved.then(() => {
+          if (savingForTranscription !== id) return;
+          savingForTranscription = null;
+          if (recording.getState().sessionId === id && recording.getState().phase === 'ready') void transcribeRecording();
+          else reportCloud();
+        });
+      }
     }
     // A timeout, microphone failure, or automatic finish must also end native tracking.
     const busy = recordingBusy(state);
@@ -88,6 +106,19 @@ export function initializeRecording() {
     }
     activeBefore = busy;
   });
+  let lastHistoryOutcome: unknown[] = [];
+  const remember = () => {
+    const audio = recording.getState(); const speech = transcription.getState(); const clean = cleanup.getState();
+    if (!audio.sessionId || speech.sessionId !== audio.sessionId || speech.phase === 'idle' || speech.phase === 'working' || clean.phase === 'working') return;
+    if (speech.phase === 'completed' && clean.enabled && clean.phase === 'idle' && speech.result?.text) return;
+    const outcome = [audio.sessionId, speech.phase, speech.result, clean.phase, clean.result];
+    if (outcome.every((value, index) => value === lastHistoryOutcome[index])) return;
+    lastHistoryOutcome = outcome;
+    const originalText = speech.result?.text ?? '';
+    const text = clean.phase === 'completed' && clean.sessionId === audio.sessionId ? clean.result?.text ?? originalText : originalText;
+    const success = speech.phase === 'completed' && !!text.trim() && (!clean.enabled || clean.phase === 'completed');
+    void savedHistory.remember({ id: audio.sessionId, text, originalText, language: speech.result?.language ?? speech.language, cleanupEnabled: clean.enabled, status: success ? 'completed' : 'failed', ...(success ? {} : { error: speech.phase === 'completed' && !originalText.trim() ? 'No speech detected.' : speech.phase === 'cancelled' || clean.phase === 'cancelled' ? 'Processing cancelled. You can retry this recording.' : 'No transcript was prepared. Retry this recording from history.' }) });
+  };
   const maybeDeliver = () => {
     const audio = recording.getState(); const speech = transcription.getState(); const clean = cleanup.getState();
     if (!window.sargosh?.deliverText || audio.phase !== 'ready' || audio.mode === 'manual' || !audio.sessionId ||
@@ -101,7 +132,7 @@ export function initializeRecording() {
   };
   const reportCloud = () => {
     const speech = transcription.getState(); const clean = cleanup.getState(); const insertion = delivery.getState();
-    const status: TranscriptionStatus = insertion.phase === 'working' ? { phase: 'working', message: insertion.message } : clean.phase === 'working' ? { phase: 'working', message: clean.message } :
+    const status: TranscriptionStatus = savingForTranscription ? { phase: 'working', message: 'Preparing text...' } : insertion.phase === 'working' ? { phase: 'working', message: insertion.message } : clean.phase === 'working' ? { phase: 'working', message: clean.message } :
       speech.phase === 'working' ? { phase: 'working', message: speech.message } : insertion.phase !== 'idle' ? { phase: insertion.phase, message: insertion.message } :
       clean.phase !== 'idle' ? { phase: clean.phase, message: clean.message } : { phase: speech.phase, message: speech.message };
     const sessionId = speech.sessionId ?? recording.getState().sessionId;
@@ -121,7 +152,7 @@ export function initializeRecording() {
     void window.sargosh?.reportTranscription(status).catch(() => {});
   };
   delivery.subscribe(reportCloud);
-  cleanup.subscribe(() => { maybeDeliver(); reportCloud(); });
+  cleanup.subscribe(() => { remember(); maybeDeliver(); reportCloud(); });
   transcription.subscribe(() => {
     const speech = transcription.getState();
     if (speech.phase !== 'completed') { cleanupSource = null; cleanup.clear(); }
@@ -129,7 +160,7 @@ export function initializeRecording() {
       cleanupSource = speech.result;
       if (cleanup.getState().enabled) void cleanupTranscript();
     }
-    maybeDeliver(); reportCloud();
+    remember(); maybeDeliver(); reportCloud();
   });
   if (window.sargosh) {
     const update = (state: WindowsState) => {
