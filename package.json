@@ -16,7 +16,9 @@
     "make": "npm run build && electron-forge make",
     "package": "npm run build && electron-forge package",
     "dev:preview": "node scripts/dev.mjs --preview",
-    "dev:desktop": "tsc -p tsconfig.main.json && node scripts/launch-desktop.mjs"
+    "dev:desktop": "tsc -p tsconfig.main.json && node scripts/launch-desktop.mjs",
+    "test:windows": "tsx scripts/windows-proof.ts",
+    "test:windows:insert": "tsx scripts/windows-proof.ts --insert-on-finish"
   },
   "dependencies": {
     "fastify": "^5.12.7",

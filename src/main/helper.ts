@@ -1,14 +1,22 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 interface Pending { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
 export class Helper {
   private child?: ChildProcessWithoutNullStreams;
   private pending = new Map<number, Pending>();
   private sequence = 0;
   ready = false;
+  private listeners = new Set<(event: string, data: unknown) => void>();
+  onEvent(listener: (event: string, data: unknown) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
   async start(root: string, dataDir: string): Promise<void> {
-    this.child = spawn(process.env.SARGOSH_PYTHON || 'python', [path.join(root, 'helper', 'main.py'), '--data-dir', dataDir], {
+    const localPython = path.join(root, '.venv', 'Scripts', 'python.exe');
+    const python = process.env.SARGOSH_PYTHON || (existsSync(localPython) ? localPython : 'python');
+    this.child = spawn(python, [path.join(root, 'helper', 'main.py'), '--data-dir', dataDir], {
       windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
     });
     const fail = () => {
@@ -20,7 +28,11 @@ export class Helper {
     this.child.stderr.on('data', () => console.error('The local helper reported an error.'));
     createInterface({ input: this.child.stdout }).on('line', line => {
       try {
-        const response = JSON.parse(line) as { id: number; error?: string; result?: unknown };
+        const response = JSON.parse(line) as { id: number; error?: string; result?: unknown; event?: string; data?: unknown };
+        if (response.event === 'windows.state') {
+          for (const listener of this.listeners) listener(response.event, response.data);
+          return;
+        }
         const pending = this.pending.get(response.id);
         if (!pending) return;
         this.pending.delete(response.id); clearTimeout(pending.timer);
@@ -34,7 +46,11 @@ export class Helper {
     return new Promise((resolve, reject) => {
       if (!this.child || this.child.killed || !this.child.stdin.writable) { reject(new Error('Local helper is unavailable.')); return; }
       const id = ++this.sequence;
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('The local helper did not respond.')); }, 5000);
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        if (method.startsWith('windows.')) { this.ready = false; this.child?.kill(); }
+        reject(new Error('The local helper did not respond.'));
+      }, 5000);
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timer });
       this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n', error => {
         if (error) { clearTimeout(timer); this.pending.delete(id); reject(new Error('Could not reach the local helper.')); }

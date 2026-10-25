@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Info, Monitor, Moon, Settings, Sun, User, X } from 'lucide-react';
 import type { Preferences, RuntimeStatus, Theme } from '../shared/types';
 import { MicrophoneTest } from './MicrophoneTest';
+import { WindowsTestPanel } from './WindowsTestPanel';
 export function SettingsDialog({ preferences, runtime, onSave, onClose }: { preferences: Preferences; runtime: RuntimeStatus; onSave(update: Partial<Preferences>): Promise<void>; onClose(): void }) {
   const [tab, setTab] = useState<'general' | 'account'>('general');
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -19,7 +20,7 @@ export function SettingsDialog({ preferences, runtime, onSave, onClose }: { pref
         <p className="eyebrow">MAKE IT YOURS</p><h2>General</h2><p className="subtitle">A few preferences for a more comfortable flow.</p>
         <div className="settings-card">
           <div className="setting-row"><div><strong>Shortcuts</strong><p>Hold to talk or double-tap for hands-free.</p></div><button className="button secondary" onClick={() => setDetails(details === 'shortcuts' ? null : 'shortcuts')}>View<ChevronRight size={14} /></button></div>
-          {details === 'shortcuts' && <div className="inline-detail"><strong>Windows shortcut setup</strong><p>Shortcut capture is not connected in this development build. Your recording will not start from a key press yet.</p><div className="shortcut-detail"><span>Hold to talk</span><kbd>Not configured</kbd></div><div className="shortcut-detail"><span>Double-tap hands-free</span><kbd>Not configured</kbd></div></div>}
+          {details === 'shortcuts' && <WindowsTestPanel shortcut={preferences.shortcut} onShortcut={value => onSave({ shortcut: value })} />}
           <div className="setting-row"><div><strong>Microphone</strong><p>Choose the input Sargosh should use.</p></div><select aria-label="Microphone" value={preferences.microphoneId} onChange={event => void onSave({ microphoneId: event.target.value })}><option value="default">Windows default</option>{devices.filter(device => device.deviceId !== 'default' && device.deviceId !== 'communications' && device.deviceId).map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || 'Microphone ' + (index + 1)}</option>)}</select></div>
           <div className="setting-row"><div><strong>My languages</strong><p>Languages used for speech recognition.</p></div><button className="button secondary" onClick={() => setDetails(details === 'languages' ? null : 'languages')}>View<ChevronRight size={14} /></button></div>
           {details === 'languages' && <div className="inline-detail"><Info size={16} /><p>Language choices will be available when Deepgram is connected. Only languages supported by the selected model will appear.</p></div>}

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session, Tray, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Helper } from './helper';
@@ -57,6 +57,26 @@ if (ownsLock) {
     });
     session.defaultSession.setPermissionCheckHandler((contents, permission, origin) => permission === 'media' && Boolean(contents) && trustedURL(contents!.getURL()) && trustedURL(origin));
     try { await helper.start(root, path.join(root, '.local', 'development')); } catch { console.error('Python helper did not start. Check your Python installation.'); }
+    helper.onEvent((event, data) => {
+      if (event !== 'windows.state') return;
+      for (const window of [mainWindow, overlayWindow]) {
+        if (window && !window.isDestroyed()) window.webContents.send('sargosh:windows-state', data);
+      }
+    });
+    handle('sargosh:windows-status', () => helper.call('windows.status'));
+    handle('sargosh:windows-start', (shortcut: unknown) => {
+      if (!dev || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Invalid Windows test request.');
+      const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
+      return helper.call('windows.arm', { shortcut, ignoredProcessIds });
+    });
+    handle('sargosh:windows-action', (action: unknown) => {
+      if (!dev || !['cancel', 'finish', 'start-hands-free', 'disarm'].includes(String(action))) throw new Error('Invalid Windows test action.');
+      return helper.call('windows.' + action);
+    });
+    handle('sargosh:windows-insert-test', (sessionId: unknown) => {
+      if (!dev || typeof sessionId !== 'string' || sessionId.length > 80) throw new Error('Invalid Windows test session.');
+      return helper.call('windows.insert-test', { sessionId });
+    });
     handle('sargosh:snapshot', () => helper.call('snapshot'));
     handle('sargosh:preferences', (update: Partial<Preferences>) => helper.call('preferences', update));
     handle('sargosh:delete', (id: unknown) => {

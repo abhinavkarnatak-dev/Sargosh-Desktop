@@ -24,6 +24,7 @@
     "src/server",
     "tests",
     "vite.config.mts",
-    "vitest.config.mts"
+    "vitest.config.mts",
+    "scripts/**/*.ts"
   ]
 }

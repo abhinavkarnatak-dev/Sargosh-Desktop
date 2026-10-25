@@ -3,6 +3,8 @@ import argparse
 import json
 import sqlite3
 import sys
+import threading
+from native_control import WindowsService
 from pathlib import Path
 
 
@@ -24,7 +26,7 @@ class Store:
 
     def preferences(self, update=None):
         if update is not None:
-            allowed = {'theme', 'microphoneId', 'collapsed'}
+            allowed = {'theme', 'microphoneId', 'collapsed', 'shortcut'}
             if not isinstance(update, dict) or set(update) - allowed:
                 raise ValueError('Invalid preferences')
             if 'theme' in update and update['theme'] not in ('system', 'light', 'dark'):
@@ -33,9 +35,12 @@ class Store:
                 raise ValueError('Invalid sidebar preference')
             if 'microphoneId' in update and (not isinstance(update['microphoneId'], str) or len(update['microphoneId']) > 512):
                 raise ValueError('Invalid microphone')
+            if 'shortcut' in update:
+                from shortcuts import parse_shortcut
+                parse_shortcut(update['shortcut'])
             with self.db:
                 self.db.executemany('INSERT OR REPLACE INTO preferences VALUES (?, ?)', [(key, json.dumps(value)) for key, value in update.items()])
-        result = {'theme': 'system', 'microphoneId': 'default', 'collapsed': False}
+        result = {'theme': 'system', 'microphoneId': 'default', 'collapsed': False, 'shortcut': 'Control+Alt+Space'}
         result.update({row['key']: json.loads(row['value']) for row in self.db.execute('SELECT * FROM preferences')})
         return result
 
@@ -70,16 +75,28 @@ def main():
     parser.add_argument('--data-dir', required=True)
     args = parser.parse_args()
     store = Store(Path(args.data_dir) / 'history.sqlite3')
+    output_lock = threading.Lock()
+
+    def write(payload):
+        with output_lock:
+            print(json.dumps(payload), flush=True)
+
+    native = WindowsService(lambda event, data: write({'event': event, 'data': data}))
     for line in sys.stdin:
         request = {}
         try:
             if len(line) > 65536: raise ValueError('Request too large')
             request = json.loads(line)
-            result = store.handle(request['method'], request.get('params', {}))
+            method = request['method']
+            params = request.get('params', {})
+            if not isinstance(params, dict):
+                raise ValueError('Invalid parameters')
+            result = native.call(method[8:], params) if method.startswith('windows.') else store.handle(method, params)
             response = {'id': request['id'], 'result': result}
         except Exception:
             response = {'id': request.get('id'), 'error': 'Local operation failed'}
-        print(json.dumps(response), flush=True)
+        write(response)
+    native.close()
     store.db.close()
 
 
