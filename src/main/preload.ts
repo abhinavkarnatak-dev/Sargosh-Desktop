@@ -4,6 +4,17 @@ import type { RecordingState } from '../shared/recording';
 import type { WindowsState } from '../shared/windows';
 import type { DesktopBridge } from '../shared/types';
 const bridge: DesktopBridge = {
+  setWindowTheme: theme => ipcRenderer.invoke('sargosh:window-theme', theme),
+  copyOverlayText: id => ipcRenderer.invoke('sargosh:overlay-copy', id),
+  resizeOverlay: height => ipcRenderer.invoke('sargosh:overlay-resize', height),
+  openSettings: () => ipcRenderer.invoke('sargosh:open-settings'),
+  onOpenSettings: listener => {
+    const handler = () => listener();
+    ipcRenderer.on('sargosh:open-settings', handler);
+    return () => { ipcRenderer.removeListener('sargosh:open-settings', handler); };
+  },
+  deliverText: request => ipcRenderer.invoke('sargosh:deliver-text', request),
+  cancelDelivery: sessionId => ipcRenderer.invoke('sargosh:delivery-cancel', sessionId),
   cleanupTranscript: request => ipcRenderer.invoke('sargosh:cleanup', request),
   transcribeAudio: request => ipcRenderer.invoke('sargosh:transcribe', request),
   cancelTranscription: requestId => ipcRenderer.invoke('sargosh:transcription-cancel', requestId),

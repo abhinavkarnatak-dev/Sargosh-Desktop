@@ -1,6 +1,7 @@
+import { ThemeMenu } from './ThemeMenu';
 import { useCallback, useEffect, useState } from 'react';
 import { BarChart3, Check, ChevronRight, Copy, Mic, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Play, Settings, ShieldCheck, Trash2, X } from 'lucide-react';
-import { EMPTY_SNAPSHOT, type Preferences, type RuntimeStatus, type Snapshot } from '../shared/types';
+import { EMPTY_SNAPSHOT, type Preferences, type Snapshot } from '../shared/types';
 import { wordsPerMinute } from '../shared/insights';
 import { RecordingPanel } from './RecordingPanel';
 import { setRecordingPreferences } from './audio/runtime';
@@ -10,22 +11,24 @@ import { SettingsDialog } from './SettingsDialog';
 export function App() {
   const [page, setPage] = useState<'dictation' | 'insights'>('dictation');
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
-  const [runtime, setRuntime] = useState<RuntimeStatus>({ desktop: Boolean(window.sargosh), helper: false, api: false, auth: false, stt: false, cleanup: false });
   const [settings, setSettings] = useState(false);
   const [notice, setNotice] = useState('');
   const [menu, setMenu] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     if (!window.sargosh) return;
-    const results = await Promise.allSettled([window.sargosh.snapshot(), window.sargosh.status()]);
-    if (results[0].status === 'fulfilled') setSnapshot(results[0].value);
-    else setNotice('Local history could not be opened. Check that the Python helper is running.');
-    if (results[1].status === 'fulfilled') setRuntime(results[1].value);
+    try { setSnapshot(await window.sargosh.snapshot()); }
+    catch { setNotice('Local history could not be opened. Check that the Python helper is running.'); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => window.sargosh?.onOpenSettings?.(() => setSettings(true)), []);
   useEffect(() => {
     const query = window.matchMedia('(prefers-color-scheme: dark)');
-    const apply = () => { document.documentElement.dataset.theme = snapshot.preferences.theme === 'system' ? (query.matches ? 'dark' : 'light') : snapshot.preferences.theme; };
+    const apply = () => {
+      const theme = snapshot.preferences.theme === 'system' ? (query.matches ? 'dark' : 'light') : snapshot.preferences.theme;
+      document.documentElement.dataset.theme = theme;
+      void window.sargosh?.setWindowTheme?.(theme).catch(() => {});
+    };
     apply(); query.addEventListener('change', apply);
     return () => query.removeEventListener('change', apply);
   }, [snapshot.preferences.theme]);
@@ -43,27 +46,27 @@ export function App() {
   }
   useEffect(() => { setRecordingPreferences(snapshot.preferences); }, [snapshot.preferences]);
   const collapsed = snapshot.preferences.collapsed;
-  return <div className={collapsed ? 'app-shell collapsed' : 'app-shell'}>
-    <aside className="sidebar">
+  return <div className="app-frame">
+    <header className="desktop-titlebar" aria-label="Window title bar"><button className="icon-button sidebar-toggle" aria-expanded={!collapsed} aria-controls="sargosh-sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => void savePreferences({ collapsed: !collapsed })}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button><ThemeMenu theme={snapshot.preferences.theme} onChange={theme => void savePreferences({ theme })} /></header>
+    <div className={collapsed ? 'app-shell collapsed' : 'app-shell'}>
+    <aside className="sidebar" id="sargosh-sidebar">
       <div className="sidebar-top">
-        <button className="icon-button sidebar-toggle" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => void savePreferences({ collapsed: !collapsed })}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
+
         <a className="brand" href="#" aria-label="Sargosh home" onClick={event => { event.preventDefault(); setPage('dictation'); }}>
           <img className="brand-dark" src="./brand/logo-dark.png" alt="" /><img className="brand-light" src="./brand/logo-light.png" alt="" />
-          {!collapsed && <span>Sargosh<span className="brand-caption">A little less typing.</span></span>}
+          <span className="sidebar-label">Sargosh<span className="brand-caption">A little less typing.</span></span>
         </a>
         <nav aria-label="Main navigation">
-          <button title="Dictation" className={page === 'dictation' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('dictation')}><Mic size={19} /><span>Dictation</span></button>
-          <button title="Insights" className={page === 'insights' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('insights')}><BarChart3 size={19} /><span>Insights</span></button>
+          <button title="Dictation" className={page === 'dictation' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('dictation')}><Mic size={19} /><span className="sidebar-label">Dictation</span></button>
+          <button title="Insights" className={page === 'insights' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('insights')}><BarChart3 size={19} /><span className="sidebar-label">Insights</span></button>
         </nav>
       </div>
       <div className="sidebar-bottom">
-        {!collapsed && <div className="local-note"><ShieldCheck size={16} /><span>Your history stays<br />on this computer.</span></div>}
-        <button title="Settings" className="nav-item" onClick={() => setSettings(true)}><Settings size={19} /><span>Settings</span></button>
-        {!collapsed && <div className="version">Sargosh 0.1.0 <span>Development</span></div>}
+        <button title="Settings" className="nav-item" onClick={() => setSettings(true)}><Settings size={19} /><span className="sidebar-label">Settings</span></button>
       </div>
     </aside>
     <main className="main-surface">
-      <header className="topbar"><span>{page === 'dictation' ? 'Your space to speak' : 'Your words, at a glance'}</span><button className="connection-badge" onClick={() => setSettings(true)}><span className={runtime.api && runtime.helper ? 'status-dot' : 'status-dot pending'} />{runtime.api && runtime.helper ? 'Local services ready' : 'Development preview'}<ChevronRight size={13} /></button></header>
+
       <div className="page-content">
         {page === 'dictation' ? <>
           <div className="page-heading"><div><p className="eyebrow">DICTATION</p><h1>Welcome to Sargosh</h1><p className="subtitle">Speak naturally. Make room for your thoughts.</p></div></div>
@@ -83,13 +86,12 @@ export function App() {
               <div className="menu-wrap"><button className="icon-button" aria-label="Recording options" aria-expanded={menu === entry.id} onClick={() => setMenu(menu === entry.id ? null : entry.id)}><MoreHorizontal size={18} /></button>{menu === entry.id && <div className="context-menu"><button disabled title="Cloud transcription is not connected">Retry transcription</button><button className="danger-text" onClick={() => { setMenu(null); setDeleting(entry.id); }}><Trash2 size={14} />Delete</button></div>}</div>
               </div></article>)}</div>}
           </section>
-          <div className="build-note"><span className="outline-tag">Development build</span><p>Record audio, transcribe with Deepgram, and clean the text with Gemini. Sign-in and automatic text insertion are not connected yet.</p></div>
         </> : <Insights snapshot={snapshot} />}
         <footer className="page-footer"><span>Speak freely. Stay in your flow.</span><span>SARGOSH</span></footer>
       </div>
     </main>
-    {settings && <SettingsDialog preferences={snapshot.preferences} runtime={runtime} onSave={savePreferences} onClose={() => setSettings(false)} />}
+    {settings && <SettingsDialog preferences={snapshot.preferences} onSave={savePreferences} onClose={() => setSettings(false)} />}
     {notice && <div className="toast" role="status"><Check size={16} /><span>{notice}</span><button className="icon-button" aria-label="Dismiss message" onClick={() => setNotice('')}><X size={15} /></button></div>}
     {deleting && <div className="modal-backdrop"><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"><h2 id="delete-title">Delete this dictation?</h2><p>This removes the entry from local history. Your accumulated insights stay unchanged.</p><div className="dialog-actions"><button className="button secondary" onClick={() => setDeleting(null)}>Keep dictation</button><button className="button danger" onClick={() => void removeEntry()}>Delete</button></div></section></div>}
-  </div>;
+  </div></div>;
 }

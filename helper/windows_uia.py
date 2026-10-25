@@ -92,6 +92,20 @@ class UIAutomation:
     def focused(self):
         return self.capture(self.uia.GetFocusedElement())
 
+    def _writable(self, element):
+        writable = False
+        try:
+            pattern = element.GetCurrentPattern(self.types.UIA_ValuePatternId)
+            writable = not pattern.QueryInterface(self.types.IUIAutomationValuePattern).CurrentIsReadOnly
+        except Exception:
+            try:
+                pattern = element.GetCurrentPattern(self.types.UIA_TextPatternId).QueryInterface(self.types.IUIAutomationTextPattern)
+                read_only = pattern.DocumentRange.GetAttributeValue(self.types.UIA_IsReadOnlyAttributeId)
+                writable = type(read_only) is bool and not read_only
+            except Exception:
+                pass
+        return writable
+
     def capture(self, element):
         if not element:
             return None
@@ -104,17 +118,7 @@ class UIAutomation:
             return None
         # TextPattern alone also exists on read-only documents. Require an editable control
         # or an explicitly writable ValuePattern. Never read a control's text or value.
-        writable = False
-        try:
-            pattern = element.GetCurrentPattern(self.types.UIA_ValuePatternId)
-            writable = not pattern.QueryInterface(self.types.IUIAutomationValuePattern).CurrentIsReadOnly
-        except Exception:
-            try:
-                pattern = element.GetCurrentPattern(self.types.UIA_TextPatternId).QueryInterface(self.types.IUIAutomationTextPattern)
-                read_only = pattern.DocumentRange.GetAttributeValue(self.types.UIA_IsReadOnlyAttributeId)
-                writable = type(read_only) is bool and not read_only
-            except Exception:
-                pass
+        writable = self._writable(element)
         if not writable:
             return None
         runtime = tuple(element.GetRuntimeId())
@@ -153,19 +157,27 @@ class UIAutomation:
         self.retained = token
 
     def insert_test(self, destination):
+        return self.insert_text(destination, TEST_TEXT)
+
+    def insert_text(self, destination, text, cancelled=None):
+        def check_cancelled():
+            if cancelled and cancelled.is_set():
+                raise ValueError('Insertion cancelled')
+        check_cancelled()
         reference = self.targets.get(destination.token)
         if not reference:
             raise ValueError('The remembered input is no longer available')
         element, hwnd, process_id, runtime = reference
         if not self.user32.IsWindow(hwnd) or element.CurrentProcessId != process_id or tuple(element.GetRuntimeId()) != runtime:
             raise ValueError('The remembered input no longer exists')
-        if element.CurrentIsPassword or not element.CurrentIsEnabled or element.CurrentIsOffscreen:
+        if element.CurrentIsPassword or not element.CurrentIsEnabled or element.CurrentIsOffscreen or not self._writable(element):
             raise ValueError('The remembered input is unavailable or protected')
         # Do not release somebody else's held keys or type while their modifiers are held.
         deadline = time.monotonic() + 0.8
         while any(self.user32.GetAsyncKeyState(vk) & 0x8000 for vk in (0x10, 0x11, 0x12, 0x5B, 0x5C)):
             if time.monotonic() >= deadline:
                 raise ValueError('Release keyboard modifiers before inserting')
+            check_cancelled()
             time.sleep(0.01)
         if self.user32.IsIconic(hwnd):
             self.user32.ShowWindow(hwnd, 9)
@@ -181,6 +193,7 @@ class UIAutomation:
             raise ValueError('Destination keyboard layout is unavailable')
 
         def before_character():
+            check_cancelled()
             current = self.uia.GetFocusedElement()
             if not self.uia.CompareElements(current, element) or current.CurrentIsPassword:
                 raise ValueError('Destination focus changed during delivery')
@@ -189,9 +202,9 @@ class UIAutomation:
             if self.user32.GetKeyboardLayout(thread_id) != layout:
                 raise ValueError('Keyboard layout changed during delivery')
 
-        self._send_text(TEST_TEXT, before_character=before_character, layout=layout)
+        self._send_text(text, before_character=before_character, layout=layout)
         # Input delivery cannot prove the application's final document contents.
-        return {'status': 'sent', 'message': 'Test input sent. Check the destination to confirm the result.'}
+        return {'status': 'sent', 'message': 'Text sent to your saved input.'}
 
     def _send_text(self, text, before_character=None, layout=None):
         class MouseInput(ctypes.Structure):

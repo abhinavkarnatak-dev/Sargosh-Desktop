@@ -25,6 +25,12 @@ class WindowsService:
         self.uia = None
         self.session = DestinationSession()
         self.generation = 0
+        self.delivery_busy = threading.Event()
+        self.delivery_cancel = threading.Event()
+        self.delivery_id = None
+        self.cancelled_deliveries = set()
+        self.processing_busy = False
+        self.input_busy = threading.Event()
 
     def status(self):
         with self.lock:
@@ -44,6 +50,27 @@ class WindowsService:
         params = params or {}
         if method == 'status':
             return self.status()
+        if method == 'set-busy':
+            if type(params.get('busy')) is not bool:
+                raise ValueError('Invalid busy state')
+            with self.lock:
+                self.processing_busy = params['busy']
+                self._sync_busy()
+            return None
+        if method == 'cancel-delivery':
+            with self.lock:
+                session_id = params.get('sessionId')
+                if isinstance(session_id, str):
+                    self.cancelled_deliveries.add(session_id)
+                if session_id == self.delivery_id:
+                    self.delivery_cancel.set()
+            return None
+        if method in ('cancel', 'disarm', 'shutdown'):
+            self.delivery_cancel.set()
+        if method == 'insert-text':
+            text = params.get('text')
+            if not isinstance(text, str) or not text.strip() or len(text) > 24000 or any(ord(c) < 32 and c not in '\n\t' or ord(c) == 127 for c in text):
+                raise ValueError('Invalid text')
         if method == 'arm':
             parse_shortcut(params.get('shortcut'))
             if params.get('purpose', 'input-test') not in ('input-test', 'recording'):
@@ -56,17 +83,41 @@ class WindowsService:
         if self.worker is None:
             self.worker = threading.Thread(target=self._run, daemon=True)
             self.worker.start()
+        if method == 'insert-text':
+            with self.lock:
+                if params.get('sessionId') in self.cancelled_deliveries:
+                    return {'status': 'unavailable', 'message': 'Insertion was cancelled. Your transcript is still available.'}
+                if self.delivery_busy.is_set():
+                    raise ValueError('Insertion is already running')
+                self.delivery_id = params.get('sessionId')
+                self.delivery_cancel = threading.Event()
+                self.delivery_busy.set()
+                self._sync_busy()
         response = queue.Queue(maxsize=1)
         self.events.put(('command', (method, params, response)))
         try:
-            result = response.get(timeout=4)
+            result = response.get(timeout=8 + len(params['text']) * .04 if method == 'insert-text' else 4)
         except queue.Empty:
+            self.delivery_cancel.set()
             raise ValueError('The Windows helper did not respond. Restart the desktop app.')
+        finally:
+            if method == 'insert-text':
+                with self.lock:
+                    self.delivery_busy.clear()
+                    self.delivery_id = None
+                    self._sync_busy()
         if isinstance(result, Exception):
             raise result
         return result
 
+    def _sync_busy(self):
+        if self.processing_busy or self.delivery_busy.is_set():
+            self.input_busy.set()
+        else:
+            self.input_busy.clear()
+
     def close(self):
+        self.delivery_cancel.set()
         if self.worker and self.worker.is_alive():
             response = queue.Queue(maxsize=1)
             self.events.put(('command', ('shutdown', {}, response)))
@@ -142,7 +193,7 @@ class WindowsService:
                 from windows_uia import UIAutomation
                 from windows_keyboard import KeyboardHook
                 self.uia = UIAutomation(self.events, params.get('ignoredProcessIds', []), self.generation)
-                self.keyboard = KeyboardHook(params['shortcut'], self.events, self.generation)
+                self.keyboard = KeyboardHook(params['shortcut'], self.events, self.generation, self.input_busy)
                 self.keyboard.start()
                 self.session.observe(self.uia.focused())
                 return self._publish()
@@ -172,6 +223,20 @@ class WindowsService:
             self.keyboard.reset()
             self.uia.retain(self.session.target.token if self.session.target else None)
             return self._publish()
+        if method == 'insert-text':
+            if self.state['purpose'] != 'recording' or self.delivery_cancel.is_set() or not self.session.target or self.session.target.token != params.get('targetId'):
+                return {'status': 'unavailable', 'message': 'The saved textbox is unavailable. Your transcript is still available in Sargosh.'}
+            try:
+                destination = self.session.claim_delivery(params.get('sessionId'))
+            except ValueError:
+                return {'status': 'unavailable', 'message': 'This recording cannot insert again. Your transcript is still available in Sargosh.'}
+            self._publish()
+            try:
+                return self.uia.insert_text(destination, params['text'], self.delivery_cancel)
+            except Exception:
+                return {'status': 'unconfirmed', 'message': 'Insertion could not be confirmed. Check your textbox before continuing. Your transcript is still available in Sargosh.'}
+            finally:
+                self.keyboard.reset()
         if method == 'insert-test':
             destination = self.session.claim_delivery(params.get('sessionId'))
             try:

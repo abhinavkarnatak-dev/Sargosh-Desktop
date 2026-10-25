@@ -1,4 +1,8 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, powerMonitor, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
+import { titleBarAppearance } from './titlebar';
+import { recoveryTextForCopy, validOverlayNotice } from '../shared/overlay-notice';
+import { resizeOverlayBounds } from './overlay-bounds';
+import { deliveryTimeout, validDeliveryRequest, type DeliveryResult } from '../shared/delivery';
+import { app, clipboard, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { RecordingCommands } from './recording-commands';
 import { enableOverlayInput } from './overlay-input';
@@ -19,6 +23,7 @@ let mainWindow: BrowserWindow | undefined;
 let overlayWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let quitting = false;
+let activeDelivery: string | null = null;
 const helper = new Helper();
 const transcriber = new DesktopTranscriber();
 const recordingCommands = new RecordingCommands();
@@ -34,6 +39,7 @@ function recordingUpdate(state: RecordingState) {
 function stopOwner(message: string) {
   recordingCommands.cancelAll();
   transcriber.cancelAll();
+  if (activeDelivery) void helper.call('windows.cancel-delivery', { sessionId: activeDelivery }).catch(() => {});
   transcriptionStatus = { phase: 'cancelled', message: 'Transcription cancelled.' };
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('sargosh:transcription-state', transcriptionStatus);
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sargosh:recording-command', 'cancel');
@@ -54,10 +60,10 @@ function handle(channel: string, callback: (value: any) => unknown): void {
 }
 function createWindow(overlay = false): BrowserWindow {
   const window = new BrowserWindow({
-    width: overlay ? 360 : 1220, height: overlay ? 120 : 820,
+    width: overlay ? 420 : 1220, height: overlay ? 120 : 820,
     minWidth: overlay ? 200 : 860, minHeight: overlay ? 50 : 620,
     title: 'Sargosh', show: false, autoHideMenuBar: true, backgroundColor: overlay ? '#00000000' : '#f7f6f2',
-    ...(overlay ? { frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true, resizable: false, focusable: false } : {}),
+    ...(overlay ? { frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true, resizable: false, focusable: false } : process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: titleBarAppearance(nativeTheme.shouldUseDarkColors ? 'dark' : 'light') } : {}),
     icon: path.join(root, 'assets', 'app-icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, backgroundThrottling: false }
   });
@@ -68,7 +74,7 @@ function createWindow(overlay = false): BrowserWindow {
   window.once('ready-to-show', () => overlay ? window.showInactive() : window.show());
   if (overlay) {
     const area = screen.getPrimaryDisplay().workArea;
-    window.setPosition(Math.round(area.x + (area.width - 360) / 2), area.y + area.height - 135);
+    window.setPosition(Math.round(area.x + (area.width - 420) / 2), area.y + area.height - 135);
   } else {
     window.webContents.on('render-process-gone', () => stopOwner('The recording window stopped. Reopen Sargosh before recording again.'));
     window.webContents.on('did-start-loading', () => {
@@ -120,7 +126,9 @@ if (ownsLock) {
     ipcMain.handle('sargosh:transcription-report', (event, value: TranscriptionStatus) => {
       checkSender(event);
       if (event.sender !== mainWindow?.webContents || !value || !['idle', 'working', 'completed', 'failed', 'cancelled'].includes(value.phase) || typeof value.message !== 'string' || value.message.length > 400) throw new Error('Invalid transcription status.');
-      transcriptionStatus = { phase: value.phase, message: value.message };
+      if (value.notice !== undefined && !validOverlayNotice(value.notice)) throw new Error('Invalid overlay notice.');
+      transcriptionStatus = { phase: value.phase, message: value.message, ...(value.notice ? { notice: value.notice } : {}) };
+      void helper.call('windows.set-busy', { busy: value.phase === 'working' }).catch(() => {});
       if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('sargosh:transcription-state', transcriptionStatus);
     });
     handle('sargosh:transcription-status', () => transcriptionStatus);
@@ -155,15 +163,32 @@ if (ownsLock) {
       if (typeof value.id !== 'string' || value.id.length > 100 || typeof value.ok !== 'boolean') throw new Error('Invalid recording control response.');
       recordingCommands.settle(event.sender.id, value.id, value.ok);
     });
+    ipcMain.handle('sargosh:deliver-text', async (event, request: unknown): Promise<DeliveryResult> => {
+      checkSender(event);
+      if (event.sender !== mainWindow?.webContents || !validDeliveryRequest(request)) throw new Error('Invalid text insertion request.');
+      if (activeDelivery || windowsState.purpose !== 'recording' || !windowsState.enabled || windowsState.phase !== 'finished' ||
+          windowsState.sessionId !== request.sessionId || windowsState.target?.id !== request.targetId ||
+          recordingState.sessionId !== request.sessionId || recordingState.phase !== 'ready') {
+        return { status: 'unavailable', message: 'The saved input is unavailable. Select a textbox before a new recording. Your transcript is still available.' };
+      }
+      activeDelivery = request.sessionId;
+      try { return await helper.call<DeliveryResult>('windows.insert-text', request, deliveryTimeout(request.text)); }
+      finally { activeDelivery = null; }
+    });
+    ipcMain.handle('sargosh:delivery-cancel', async (event, sessionId: unknown) => {
+      checkSender(event);
+      if (event.sender !== mainWindow?.webContents || !isRequestId(sessionId)) throw new Error('Invalid insertion cancellation.');
+      if (activeDelivery === sessionId) await helper.call('windows.cancel-delivery', { sessionId });
+    });
     handle('sargosh:recording-start', (shortcut: unknown) => {
-      if (recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Finish recording before changing shortcuts.');
+      if (activeDelivery || recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Finish recording before changing shortcuts.');
       const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
       return helper.call('windows.arm', { shortcut, ignoredProcessIds, purpose: 'recording' });
     });
     powerMonitor.on('suspend', () => stopOwner('The computer went to sleep. Any active recording was discarded.'));
 
     handle('sargosh:windows-start', (shortcut: unknown) => {
-      if (recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || !dev || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Invalid Windows test request.');
+      if (activeDelivery || recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || !dev || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Invalid Windows test request.');
       const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
       return helper.call('windows.arm', { shortcut, ignoredProcessIds });
     });
@@ -181,12 +206,30 @@ if (ownsLock) {
       if (typeof id !== 'string' || id.length > 100) throw new Error('Invalid history entry.');
       return helper.call('delete', { id });
     });
+    ipcMain.handle('sargosh:overlay-copy', (event, id: unknown) => {
+      checkSender(event);
+      if (event.sender !== overlayWindow?.webContents) throw new Error('Only the overlay can copy recovery text.');
+      clipboard.writeText(recoveryTextForCopy(transcriptionStatus, id));
+    });
+    ipcMain.handle('sargosh:overlay-resize', (event, height: unknown) => {
+      checkSender(event);
+      if (event.sender !== overlayWindow?.webContents || !overlayWindow || typeof height !== 'number' || !Number.isFinite(height)) throw new Error('Invalid overlay size.');
+      const bounds = overlayWindow.getBounds();
+      const area = screen.getDisplayMatching(bounds).workArea;
+      overlayWindow.setBounds(resizeOverlayBounds(bounds, area, height));
+    });
+    handle('sargosh:open-settings', () => { showMain(); mainWindow?.webContents.send('sargosh:open-settings'); });
+    ipcMain.handle('sargosh:window-theme', (event, theme: unknown) => {
+      checkSender(event);
+      if (event.sender !== mainWindow?.webContents || (theme !== 'light' && theme !== 'dark')) throw new Error('Invalid window theme.');
+      if (process.platform === 'win32') mainWindow?.setTitleBarOverlay(titleBarAppearance(theme));
+    });
     handle('sargosh:open-main', () => showMain());
     handle('sargosh:move-overlay', ({ dx, dy }: { dx: number; dy: number }) => {
       if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.abs(dx) > 500 || Math.abs(dy) > 500 || !overlayWindow) return;
-      const [x, y] = overlayWindow.getPosition();
+      const { x, y, width, height } = overlayWindow.getBounds();
       const area = screen.getDisplayNearestPoint({ x, y }).workArea;
-      overlayWindow.setPosition(Math.round(Math.max(area.x, Math.min(x + dx, area.x + area.width - 360))), Math.round(Math.max(area.y, Math.min(y + dy, area.y + area.height - 120))));
+      overlayWindow.setPosition(Math.round(Math.max(area.x, Math.min(x + dx, area.x + area.width - width))), Math.round(Math.max(area.y, Math.min(y + dy, area.y + area.height - height))));
     });
     handle('sargosh:status', async (): Promise<RuntimeStatus> => {
       try {

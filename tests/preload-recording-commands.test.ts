@@ -27,3 +27,26 @@ it('still handles coordinator shutdown notifications', async () => {
   await electron.on.mock.calls[0][1]({}, 'cancel');
   expect(cancel).toHaveBeenCalledWith('cancel'); expect(electron.invoke).not.toHaveBeenCalled();
 });
+
+it('routes real text and cancellation through the restricted desktop bridge', async () => {
+  const request = { sessionId: 'session', targetId: 'target', text: 'A real transcript.' };
+  await bridge.deliverText(request);
+  expect(electron.invoke).toHaveBeenCalledWith('sargosh:deliver-text', request);
+  await bridge.cancelDelivery('session');
+  expect(electron.invoke).toHaveBeenCalledWith('sargosh:delivery-cancel', 'session');
+});
+
+it('routes recovery copy, resizing, and microphone settings through named desktop actions', async () => {
+  await bridge.copyOverlayText('notice'); await bridge.resizeOverlay(300); await bridge.openSettings();
+  expect(electron.invoke).toHaveBeenCalledWith('sargosh:overlay-copy', 'notice');
+  expect(electron.invoke).toHaveBeenCalledWith('sargosh:overlay-resize', 300);
+  expect(electron.invoke).toHaveBeenCalledWith('sargosh:open-settings');
+  const open = vi.fn(); const unsubscribe = bridge.onOpenSettings(open);
+  const handler = electron.on.mock.calls[0][1]; handler(); expect(open).toHaveBeenCalledOnce();
+  unsubscribe(); expect(electron.remove).toHaveBeenCalledWith('sargosh:open-settings', handler);
+});
+
+it('sends only a resolved light or dark theme to the native title bar', async () => {
+  await bridge.setWindowTheme('dark');
+  expect(electron.invoke).toHaveBeenCalledWith('sargosh:window-theme', 'dark');
+});

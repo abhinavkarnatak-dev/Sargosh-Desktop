@@ -1,5 +1,6 @@
+import { recordingNotice, type OverlayNotice } from '../shared/overlay-notice';
 import { useEffect, useRef, useState } from 'react';
-import { Check, GripVertical, LoaderCircle, Mic, X } from 'lucide-react';
+import { AlertCircle, Check, Copy, GripVertical, LoaderCircle, Mic, X } from 'lucide-react';
 import type { TranscriptionStatus } from '../shared/transcription';
 import { INITIAL_RECORDING_STATE, recordingBusy, type RecordingState } from '../shared/recording';
 import { INITIAL_WINDOWS_STATE, type WindowsState } from '../shared/windows';
@@ -9,6 +10,9 @@ export function Overlay() {
   const [audio, setAudio] = useState<RecordingState>(INITIAL_RECORDING_STATE);
   const [speech, setSpeech] = useState<TranscriptionStatus>({ phase: 'idle', message: '' });
   const [error, setError] = useState('');
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const noticeElement = useRef<HTMLDivElement>(null);
+  useEffect(() => { setError(''); }, [audio.sessionId]);
   const drag = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
     if (!window.sargosh) return;
@@ -34,6 +38,17 @@ export function Overlay() {
   const audioActive = recordingBusy(audio);
   const preparing = audio.phase === 'finishing' || cloudActive;
   const active = state.enabled && ['pending', 'listening'].includes(state.phase);
+  const notice = error ? { id: 'control:' + error, kind: 'error' as const, title: 'Control unavailable', message: error } : recordingNotice(audio, speech);
+  const visibleNotice = notice && notice.id !== dismissed ? notice : null;
+  useEffect(() => { if (!notice) setDismissed(null); }, [notice?.id]);
+  useEffect(() => {
+    const element = noticeElement.current;
+    const resize = () => { void window.sargosh?.resizeOverlay?.(element ? Math.min(400, Math.max(120, Math.ceil(element.getBoundingClientRect().height + 80))) : 120).catch(() => {}); };
+    resize();
+    if (!element) return;
+    const observer = new ResizeObserver(resize); observer.observe(element);
+    return () => observer.disconnect();
+  }, [visibleNotice?.id]);
   async function recordingAction(value: 'cancel' | 'finish') {
     setError('');
     try {
@@ -47,6 +62,7 @@ export function Overlay() {
     catch { setError('Control unavailable. Quit Sargosh from the tray and reopen it.'); }
   }
   return <div className="overlay-stage">
+    {visibleNotice && <div ref={noticeElement} className="overlay-notice-wrap"><NoticeCard key={visibleNotice.id} notice={visibleNotice} onDismiss={() => { setDismissed(visibleNotice.id); setError(''); }} /></div>}
     <div className={(expanded || active || audioActive || cloudActive ? 'overlay-pill expanded' : 'overlay-pill') + (audioActive || cloudActive ? ' recording-active' : active ? ' input-test-active' : '')} onMouseEnter={() => setExpanded(true)} onMouseLeave={() => { if (!drag.current) setExpanded(false); }}>
       {preparing ? <div className="overlay-preparing" role="status" aria-label="Preparing text">
         <span className="overlay-wave" aria-hidden="true">{[0,1,2,3,4,5,6].map(index => <i key={index} style={{ height: '3px' }} />)}</span>
@@ -64,7 +80,34 @@ export function Overlay() {
         <button className="overlay-mic" aria-label={state.enabled ? state.purpose === 'recording' ? 'Start hands-free recording' : 'Start hands-free input test' : 'Open Sargosh to set up dictation'} title={state.enabled ? state.purpose === 'recording' ? 'Start recording' : 'Start input test' : 'Set up dictation in Sargosh'} onClick={() => state.enabled ? void action('start-hands-free') : void window.sargosh?.openMain()}><Mic size={19} /></button>
         <span className="overlay-tooltip">{state.enabled ? (state.purpose === 'recording' ? 'Record - ' : 'Input test - ') + state.shortcut : 'Set up dictation in Sargosh'}</span>
       </> : <span className="idle-line" />}
-      {error && <span className="overlay-tooltip" role="alert">{error}</span>}
     </div>
   </div>;
+}
+
+function NoticeCard({ notice, onDismiss }: { notice: OverlayNotice; onDismiss: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
+  async function openHelp() {
+    try {
+      if (!window.sargosh) throw new Error();
+      if (/microphone|recording|speech/i.test(notice.title)) await window.sargosh.openSettings();
+      else await window.sargosh.openMain();
+      onDismiss();
+    } catch { setCopyError('Open Sargosh from the tray to check your dictation.'); }
+  }
+  async function copy() {
+    try {
+      if (!window.sargosh?.copyOverlayText) throw new Error();
+      await window.sargosh.copyOverlayText(notice.id); setCopied(true); setCopyError('');
+    } catch { setCopyError('Could not copy. Open Sargosh to recover your text.'); }
+  }
+  return <section className="overlay-notice" role={notice.kind === 'info' ? 'status' : 'alert'} aria-label={notice.title}>
+    <header><span className={'overlay-notice-icon ' + notice.kind}>{notice.kind === 'info' ? <Check size={16} /> : <AlertCircle size={16} />}</span><strong>{notice.title}</strong><button className="overlay-notice-close" aria-label="Dismiss notification" onClick={onDismiss}><X size={17} /></button></header>
+    <p>{notice.message}</p>
+    {notice.text && <div className="overlay-recovery-text" tabIndex={0} aria-label="Recovered dictation">{notice.text}</div>}
+    <div className="overlay-notice-actions">
+      {notice.text ? <button onClick={() => void copy()}><Copy size={13} />{copied ? 'Copied' : 'Copy text'}</button> : notice.kind === 'error' && <button onClick={() => void openHelp()}>{/microphone|recording|speech/i.test(notice.title) ? 'Microphone settings' : 'Open Sargosh'}</button>}
+      {copyError && <span role="status">{copyError}</span>}
+    </div>
+  </section>;
 }

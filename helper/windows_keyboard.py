@@ -11,9 +11,10 @@ INPUT_TAG = 0x53415247
 
 
 class KeyboardHook:
-    def __init__(self, shortcut, events, generation):
+    def __init__(self, shortcut, events, generation, blocked=None):
         self.modifiers, self.key = parse_shortcut(shortcut)
         self.events = events
+        self.blocked = blocked
         self.generation = generation
         self.gesture = Gesture()
         self.pressed = set()
@@ -39,6 +40,9 @@ class KeyboardHook:
         self.thread.join(timeout=2)
 
     def _emit(self, events):
+        if self.blocked is not None and self.blocked.is_set():
+            self.gesture.reset()
+            return
         for event in events:
             self.events.put(('gesture', (self.generation, event)))
 

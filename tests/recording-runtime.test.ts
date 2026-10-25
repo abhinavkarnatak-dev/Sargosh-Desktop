@@ -12,6 +12,8 @@ let native: WindowsState;
 let nativeListener: (state: WindowsState) => void;
 let commandListener: (action: 'finish' | 'cancel') => void;
 let bridge: {
+  deliverText: ReturnType<typeof vi.fn>;
+  cancelDelivery: ReturnType<typeof vi.fn>;
   onWindowsState: ReturnType<typeof vi.fn>;
   onRecordingCommand: ReturnType<typeof vi.fn>;
   windowsStatus: ReturnType<typeof vi.fn>;
@@ -28,6 +30,8 @@ beforeEach(async () => {
   fake.transcribe.mockResolvedValue({ text: 'Recognized text', language: 'en', model: 'nova-3', durationMs: 1000, confidence: .9 });
   native = { ...INITIAL_WINDOWS_STATE, enabled: true, purpose: 'recording' };
   bridge = {
+    deliverText: vi.fn(async () => ({ status: 'sent', message: 'Text sent to your saved input.' })),
+    cancelDelivery: vi.fn(async () => {}),
     onWindowsState: vi.fn(listener => { nativeListener = listener; return () => {}; }),
     onRecordingCommand: vi.fn(listener => { commandListener = listener; return () => {}; }),
     windowsStatus: vi.fn(async () => native),
@@ -195,4 +199,96 @@ it('an old finish cannot block a new session after cancellation', async () => {
   expect(runtime.recording.getState()).toMatchObject({ sessionId: 'next', phase: 'ready' });
   resolve(previous); await flush();
   expect(runtime.recording.getState()).toMatchObject({ sessionId: 'next', phase: 'ready' });
+});
+
+it('delivers the cleaned text to the frozen native target exactly once', async () => {
+  speaking(); await flush(); commandListener('finish'); await flush();
+  await runtime.transcribeRecording(); await flush();
+  expect(bridge.deliverText).toHaveBeenCalledExactlyOnceWith({ sessionId: 'session', targetId: 'target', text: 'Cleaned text' });
+  expect(runtime.delivery.getState().phase).toBe('completed');
+  await runtime.cleanupTranscript(); await flush(); await runtime.transcribeRecording(); await flush();
+  expect(bridge.deliverText).toHaveBeenCalledOnce();
+});
+it('delivers original speech when cleanup is disabled', async () => {
+  runtime.cleanup.configure(false); speaking(); await flush(); commandListener('finish'); await flush();
+  await runtime.transcribeRecording(); await flush();
+  expect(bridge.deliverText).toHaveBeenCalledExactlyOnceWith({ sessionId: 'session', targetId: 'target', text: 'Recognized text' });
+});
+it('waits for cleanup and keeps the loader working until insertion responds', async () => {
+  let clean!: (result: unknown) => void; let sent!: (result: unknown) => void;
+  fake.cleanup.mockReturnValueOnce(new Promise(resolve => { clean = resolve; }));
+  bridge.deliverText.mockReturnValueOnce(new Promise(resolve => { sent = resolve; }));
+  speaking(); await flush(); commandListener('finish'); await flush(); await runtime.transcribeRecording(); await flush();
+  expect(bridge.deliverText).not.toHaveBeenCalled();
+  clean({ text: 'Final', model: 'gemini-3.5-flash-lite' }); await flush();
+  expect(runtime.cloudBusy()).toBe(true);
+  expect(bridge.reportTranscription).toHaveBeenLastCalledWith({ phase: 'working', message: 'Preparing text...' });
+  await runtime.startRecording(); expect(fake.open).toHaveBeenCalledOnce();
+  sent({ status: 'sent', message: 'Text sent.' }); await flush(); expect(runtime.cloudBusy()).toBe(false);
+});
+it('does not fall back to uncleaned text on cleanup failure and permits a cleanup retry', async () => {
+  fake.cleanup.mockRejectedValueOnce(new Error('Unavailable')); speaking(); await flush(); commandListener('finish'); await flush();
+  await runtime.transcribeRecording(); await flush(); expect(bridge.deliverText).not.toHaveBeenCalled();
+  await runtime.cleanupTranscript(); await flush(); expect(bridge.deliverText).toHaveBeenCalledOnce();
+});
+it('does not insert cancelled, empty, or targetless results', async () => {
+  native = { ...native, revision: native.revision + 1, phase: 'listening', sessionId: 'none', mode: 'hands-free', target: null }; nativeListener(native); await flush();
+  commandListener('finish'); await flush(); await runtime.transcribeRecording(); await flush();
+  expect(bridge.deliverText).not.toHaveBeenCalled(); expect(runtime.delivery.getState().message).toContain('No saved textbox');
+});
+it('cancels insertion on discard and ignores late completion', async () => {
+  let sent!: (result: unknown) => void;
+  bridge.deliverText.mockReturnValueOnce(new Promise(resolve => { sent = resolve; }));
+  speaking(); await flush(); commandListener('finish'); await flush(); await runtime.transcribeRecording(); await flush();
+  runtime.recording.clear(); await flush();
+  expect(bridge.cancelDelivery).toHaveBeenCalledWith('session');
+  sent({ status: 'sent', message: 'Late success' }); await flush();
+  expect(runtime.delivery.getState().phase).toBe('idle');
+});
+it('preserves text on unconfirmed delivery and does not automatically retry', async () => {
+  bridge.deliverText.mockResolvedValueOnce({ status: 'unconfirmed', message: 'Check your textbox.' });
+  speaking(); await flush(); commandListener('finish'); await flush(); await runtime.transcribeRecording(); await flush();
+  expect(runtime.delivery.getState().phase).toBe('failed');
+  expect(runtime.cleanup.getState().result?.text).toBe('Cleaned text');
+  await runtime.cleanupTranscript(); await flush(); expect(bridge.deliverText).toHaveBeenCalledOnce();
+});
+
+it('reports a later cleanup retry as busy even after the first insertion has completed', async () => {
+  speaking(); await flush(); commandListener('finish'); await flush(); await runtime.transcribeRecording(); await flush();
+  let finish!: (result: unknown) => void;
+  fake.cleanup.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  const pending = runtime.cleanupTranscript(); await flush();
+  expect(bridge.reportTranscription.mock.lastCall?.[0].phase).toBe('working');
+  finish({ text: 'Revised text', model: 'gemini-3.5-flash-lite' }); await pending; await flush();
+  expect(bridge.deliverText).toHaveBeenCalledOnce();
+});
+
+it('automatically delivers separate hold and hands-free sessions in any order to the latest frozen target', async () => {
+  runtime.transcription.configure({ automatic: true });
+  for (const [index, mode] of (['hold', 'hands-free', 'hands-free', 'hold'] as const).entries()) {
+    const sessionId = 'repeat-' + index;
+    native = { ...native, revision: native.revision + 1, phase: 'pending', sessionId, mode, target: { id: 'first', application: 'notepad.exe' } };
+    nativeListener(native);
+    native = { ...native, revision: native.revision + 1, phase: 'listening', target: { id: 'latest-' + index, application: 'notepad.exe' } };
+    nativeListener(native); await flush(); commandListener('finish'); await flush(); await flush();
+    expect(bridge.deliverText).toHaveBeenLastCalledWith({ sessionId, targetId: 'latest-' + index, text: 'Cleaned text' });
+    expect(runtime.delivery.getState().phase).toBe('completed');
+  }
+  expect(bridge.deliverText).toHaveBeenCalledTimes(4);
+});
+
+it('publishes cleaned recovery text when no target is saved', async () => {
+  native = { ...native, revision: native.revision + 1, phase: 'listening', sessionId: 'none', mode: 'hands-free', target: null }; nativeListener(native); await flush();
+  commandListener('finish'); await flush(); await runtime.transcribeRecording(); await flush();
+  const notice = bridge.reportTranscription.mock.lastCall?.[0].notice;
+  expect(notice).toMatchObject({ kind: 'recovery', text: 'Cleaned text', title: 'Your text is ready' });
+  const id = notice.id;
+  runtime.transcription.configure({ automatic: true }); await flush();
+  expect(bridge.reportTranscription.mock.lastCall?.[0].notice.id).toBe(id);
+});
+it('publishes no-speech feedback without inventing recovery text', async () => {
+  fake.transcribe.mockResolvedValueOnce({ text: '', language: 'en', model: 'nova-3', durationMs: 1000, confidence: null });
+  speaking(); await flush(); commandListener('finish'); await flush(); await runtime.transcribeRecording(); await flush();
+  expect(bridge.reportTranscription.mock.lastCall?.[0].notice).toMatchObject({ title: 'No speech detected' });
+  expect(bridge.reportTranscription.mock.lastCall?.[0].notice.text).toBeUndefined();
 });

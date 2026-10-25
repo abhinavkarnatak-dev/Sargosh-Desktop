@@ -44,7 +44,7 @@ export class Helper {
     await this.call('ping');
     this.ready = true;
   }
-  call<T>(method: string, params: unknown = {}): Promise<T> {
+  call<T>(method: string, params: unknown = {}, timeoutMs = 5000): Promise<T> {
     return new Promise((resolve, reject) => {
       if (!this.child || this.child.killed || !this.child.stdin.writable) { reject(new Error('Local helper is unavailable.')); return; }
       const id = ++this.sequence;
@@ -52,7 +52,7 @@ export class Helper {
         this.pending.delete(id);
         if (method.startsWith('windows.')) { this.ready = false; this.child?.kill(); }
         reject(new Error('The local helper did not respond.'));
-      }, 5000);
+      }, timeoutMs);
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timer });
       this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n', error => {
         if (error) { clearTimeout(timer); this.pending.delete(id); reject(new Error('Could not reach the local helper.')); }

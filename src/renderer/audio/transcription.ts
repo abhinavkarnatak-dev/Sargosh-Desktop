@@ -17,7 +17,7 @@ export class TranscriptionController {
       const result = await this.transport(blob, this.state.language, this.makeId(), abort.signal);
       if (this.active !== abort || abort.signal.aborted) return;
       this.active = undefined;
-      this.update({ phase: 'completed', result, message: result.text ? 'Transcript ready. Automatic insertion is not connected yet.' : 'No speech was recognized. Play the clip and check the microphone or language.' });
+      this.update({ phase: 'completed', result, message: result.text ? 'Transcript ready.' : 'No speech was recognized. Play the clip and check the microphone or language.' });
     } catch (error) {
       if (this.active !== abort) return;
       this.active = undefined;

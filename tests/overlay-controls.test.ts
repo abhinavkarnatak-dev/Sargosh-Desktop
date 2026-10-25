@@ -15,8 +15,13 @@ let updateAudio: (value: RecordingState) => void;
 let updateSpeech: (value: TranscriptionStatus) => void;
 const recordingAction = vi.fn();
 const windowsAction = vi.fn();
+const copyOverlayText = vi.fn();
+const openSettings = vi.fn();
+const openMain = vi.fn();
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  openMain.mockReset().mockResolvedValue(undefined);
+  copyOverlayText.mockReset().mockResolvedValue(undefined); openSettings.mockReset().mockResolvedValue(undefined);
   recordingAction.mockReset().mockResolvedValue(undefined);
   windowsAction.mockReset().mockResolvedValue({ ...INITIAL_WINDOWS_STATE, revision: 2, enabled: true, purpose: 'recording', phase: 'listening' });
   audio = { ...INITIAL_RECORDING_STATE, revision: 1, phase: 'recording', sessionId: 'one', mode: 'hands-free' };
@@ -25,7 +30,7 @@ beforeEach(() => {
     onWindowsState: () => () => {}, windowsStatus: async () => ({ ...INITIAL_WINDOWS_STATE, enabled: true, purpose: 'recording' }),
     onRecordingState: (listener: (value: RecordingState) => void) => { updateAudio = listener; return () => {}; }, recordingStatus: async () => audio,
     onTranscriptionState: (listener: (value: TranscriptionStatus) => void) => { updateSpeech = listener; return () => {}; }, transcriptionStatus: async () => speech,
-    recordingAction, windowsAction
+    recordingAction, windowsAction, copyOverlayText, openSettings, openMain
   } as unknown as NonNullable<typeof window.sargosh>;
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -92,4 +97,55 @@ it.each(['failed', 'cancelled'] as const)('removes the loader when processing is
   expect(host.querySelector('.overlay-spinner')).not.toBeNull();
   await act(async () => updateSpeech({ phase, message: 'Processing stopped.' }));
   expect(host.querySelector('.overlay-spinner')).toBeNull();
+});
+
+it('shows a dismissible microphone warning above the pill while listening', async () => {
+  audio = { ...audio, quiet: true }; await render();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('No microphone activity');
+  expect(host.querySelector('.overlay-stage')?.firstElementChild?.classList.contains('overlay-notice-wrap')).toBe(true);
+  await act(async () => (host.querySelector('.overlay-notice-actions button') as HTMLButtonElement).click());
+  expect(openSettings).toHaveBeenCalledOnce();
+  expect(host.querySelector('.overlay-notice')).toBeNull();
+  expect(host.querySelector('.overlay-pill')).not.toBeNull();
+  await act(async () => updateAudio({ ...audio, revision: 2, level: 0 }));
+  expect(host.querySelector('.overlay-notice')).toBeNull();
+});
+it('shows recorder failures and cancellation above the overlay', async () => {
+  audio = { ...audio, phase: 'failed', message: 'Could not open the microphone.' }; await render();
+  expect(host.querySelector('.overlay-notice')?.textContent).toContain('Could not open the microphone.');
+  await act(async () => updateAudio({ ...audio, phase: 'cancelled', revision: 2 }));
+  expect(host.querySelector('.overlay-notice')?.textContent).toContain('Recording cancelled');
+});
+it('shows recovered text and copies only on an explicit click', async () => {
+  audio = { ...audio, phase: 'ready' };
+  speech = { phase: 'failed', message: 'Missing input', notice: { id: 'recovery-1', kind: 'recovery', title: 'Your text is ready', message: 'Copy it below.', text: 'My prepared text.' } };
+  await render(); expect(host.querySelector('.overlay-recovery-text')?.textContent).toBe('My prepared text.');
+  expect(copyOverlayText).not.toHaveBeenCalled();
+  await act(async () => (host.querySelector('.overlay-notice-actions button') as HTMLButtonElement).click());
+  expect(copyOverlayText).toHaveBeenCalledExactlyOnceWith('recovery-1');
+  expect(host.querySelector('.overlay-notice-actions button')?.textContent).toBe('Copied');
+  await press('Dismiss notification'); expect(host.querySelector('.overlay-recovery-text')).toBeNull();
+});
+it('explains a failed copy and clears old recovery text as a new recording starts', async () => {
+  audio = { ...audio, phase: 'ready' };
+  speech = { phase: 'failed', message: '', notice: { id: 'old', kind: 'recovery', title: 'Your text is ready', message: '', text: 'Old dictation' } };
+  copyOverlayText.mockRejectedValueOnce(new Error('Expired'));
+  await render(); await act(async () => (host.querySelector('.overlay-notice-actions button') as HTMLButtonElement).click());
+  expect(host.querySelector('.overlay-notice')?.textContent).toContain('Could not copy');
+  await act(async () => updateAudio({ ...audio, sessionId: 'next', phase: 'opening', revision: 2 }));
+  expect(host.querySelector('.overlay-recovery-text')).toBeNull();
+});
+
+it('dismisses a general error card after opening the main app and keeps the pill', async () => {
+  audio = { ...audio, phase: 'ready' };
+  speech = { phase: 'failed', message: '', notice: { id: 'error', kind: 'error', title: 'Could not prepare your text', message: 'Please try again.' } };
+  await render(); await act(async () => (host.querySelector('.overlay-notice-actions button') as HTMLButtonElement).click());
+  expect(openMain).toHaveBeenCalledOnce(); expect(host.querySelector('.overlay-notice')).toBeNull();
+  expect(host.querySelector('.overlay-pill')).not.toBeNull();
+});
+it('keeps the card available if opening the app fails', async () => {
+  audio = { ...audio, quiet: true }; openSettings.mockRejectedValueOnce(new Error('Unavailable'));
+  await render(); await act(async () => (host.querySelector('.overlay-notice-actions button') as HTMLButtonElement).click());
+  expect(host.querySelector('.overlay-notice')?.textContent).toContain('Open Sargosh from the tray');
+  expect(host.querySelector('.overlay-pill')).not.toBeNull();
 });

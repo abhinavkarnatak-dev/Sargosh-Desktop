@@ -1,6 +1,7 @@
+import type { OverlayNotice } from './overlay-notice';
 export const STT_LANGUAGES = [
   { value: 'en', label: 'English' }, { value: 'hi', label: 'Hindi' },
-  { value: 'multi', label: 'Multilingual (including English and Hindi)' }
+  { value: 'multi', label: 'Hinglish' }
 ] as const;
 export type SpeechLanguage = typeof STT_LANGUAGES[number]['value'];
 export const isSpeechLanguage = (value: unknown): value is SpeechLanguage => STT_LANGUAGES.some(item => item.value === value);
@@ -8,7 +9,7 @@ export interface Transcript {
   text: string; language: SpeechLanguage; model: 'nova-3'; durationMs: number; confidence: number | null;
 }
 export type TranscriptionPhase = 'idle' | 'working' | 'completed' | 'failed' | 'cancelled';
-export interface TranscriptionStatus { phase: TranscriptionPhase; message: string }
+export interface TranscriptionStatus { phase: TranscriptionPhase; message: string; notice?: OverlayNotice }
 export interface TranscriptionState extends TranscriptionStatus {
   sessionId: string | null; result: Transcript | null; language: SpeechLanguage; automatic: boolean;
 }

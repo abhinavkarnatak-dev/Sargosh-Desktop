@@ -1,15 +1,18 @@
+import { ThemedSelect } from './ThemedSelect';
 import { useEffect, useState } from 'react';
 import { Copy, Mic, Square, Trash2, X } from 'lucide-react';
 import { STT_LANGUAGES, isSpeechLanguage } from '../shared/transcription';
 import { recordingBusy } from '../shared/recording';
 import type { Preferences } from '../shared/types';
 import { INITIAL_WINDOWS_STATE, type WindowsState } from '../shared/windows';
-import { cancelRecording, cleanup, cleanupTranscript, useCleanup, finishRecording, recording, startRecording, transcribeRecording, transcription, useTranscription, useRecording } from './audio/runtime';
+import { cancelRecording, delivery, useDelivery, cleanup, cleanupTranscript, useCleanup, finishRecording, recording, startRecording, transcribeRecording, transcription, useTranscription, useRecording } from './audio/runtime';
 
 export function RecordingPanel({ preferences }: { preferences: Preferences }) {
   const state = useRecording();
   const speech = useTranscription();
   const clean = useCleanup();
+  const insertion = useDelivery();
+  const inserting = insertion.phase === 'working';
   const cleaning = clean.phase === 'working';
   const outputText = clean.result ? clean.result.text : speech.result?.text || '';
   const transcribing = speech.phase === 'working';
@@ -18,7 +21,7 @@ export function RecordingPanel({ preferences }: { preferences: Preferences }) {
   const [error, setError] = useState('');
   const [audioURL, setAudioURL] = useState('');
   const busy = recordingBusy(state);
-  const processing = busy || transcribing || cleaning;
+  const processing = busy || transcribing || cleaning || inserting;
   const armed = native.enabled && native.purpose === 'recording';
   const blob = recording.getClip();
   useEffect(() => {
@@ -54,7 +57,7 @@ export function RecordingPanel({ preferences }: { preferences: Preferences }) {
     {window.sargosh ? <p className="inline-help">{armed ? 'Shortcuts ready: ' + native.shortcut + '. Hold and release, or double-tap to start and double-tap again to finish.' : 'Enable recording shortcuts to use this while Sargosh is in the background.'}</p> : <p className="inline-help">Browser preview supports these buttons. Global shortcuts and the floating control need the Electron app.</p>}
     <div className="transcription-options">
       <label htmlFor="transcription-language">Speech language</label>
-      <select id="transcription-language" value={speech.language} disabled={processing} onChange={event => { if (isSpeechLanguage(event.target.value)) transcription.configure({ language: event.target.value }); }}>{STT_LANGUAGES.map(language => <option key={language.value} value={language.value}>{language.label}</option>)}</select>
+      <ThemedSelect id="transcription-language" value={speech.language} disabled={processing} options={STT_LANGUAGES} onChange={value => { if (isSpeechLanguage(value)) transcription.configure({ language: value }); }} />
       <label className="automatic-transcription"><input type="checkbox" checked={speech.automatic} disabled={processing} onChange={event => transcription.configure({ automatic: event.target.checked })} />Transcribe automatically after recording</label>
       <label className="automatic-transcription"><input type="checkbox" checked={clean.enabled} disabled={processing} onChange={event => cleanup.configure(event.target.checked)} />Clean up with Gemini after transcription</label>
     </div>
@@ -63,8 +66,9 @@ export function RecordingPanel({ preferences }: { preferences: Preferences }) {
     <p className={state.phase === 'failed' ? 'error-message' : 'inline-help'}>{state.message}</p>
     {state.quiet && <p className="recording-quiet" role="status">No microphone activity detected. Check that your mic is not muted.</p>}
     {audioURL && <div className="recording-preview"><audio controls src={audioURL} aria-label="Latest local recording" /><button className="button secondary" onClick={() => recording.clear()}><Trash2 size={14} />Discard audio</button><span>{Math.round((state.clip?.bytes || 0) / 1024)} KB - {state.clip?.mimeType}</span></div>}
-    {state.phase === 'ready' && state.clip && <div className="transcription-actions"><button className="button" disabled={transcribing || cleaning} onClick={() => void transcribeRecording()}>{transcribing ? 'Transcribing...' : speech.phase === 'completed' ? 'Transcribe again' : 'Transcribe recording'}</button>{transcribing && <button className="button secondary" onClick={() => transcription.cancel()}>Cancel transcription</button>}</div>}
-    {speech.phase !== 'idle' && <section className="transcript-panel" aria-label="Deepgram transcript"><div role="status"><strong>{cleaning ? 'Cleaning with Gemini' : speech.phase === 'working' ? 'Transcribing' : speech.phase === 'completed' ? clean.result ? 'Cleaned text' : 'Deepgram transcript' : speech.phase === 'cancelled' ? 'Transcription cancelled' : 'Transcription unavailable'}</strong><p className={speech.phase === 'failed' ? 'error-message' : 'inline-help'}>{speech.message}</p></div>{clean.phase !== 'idle' && <p className={clean.phase === 'failed' ? 'error-message' : 'inline-help'} role="status">{clean.message}</p>}{speech.result?.text && <><p className="transcript-text">{outputText}</p><button className="button secondary" disabled={cleaning || !outputText} onClick={() => void navigator.clipboard.writeText(outputText).then(() => setError(''), () => setError('Could not copy the transcript.'))}><Copy size={14} />Copy {clean.result ? 'cleaned text' : 'transcript'}</button><div className="transcription-actions"><button className="button secondary" disabled={processing} onClick={() => void cleanupTranscript()}>{clean.result ? 'Clean up again' : clean.phase === 'failed' || clean.phase === 'cancelled' ? 'Retry cleanup' : 'Clean up transcript'}</button>{cleaning && <button className="button secondary" onClick={() => cleanup.cancel()}>Cancel cleanup</button>}</div>{clean.phase !== 'idle' && <details className="original-transcript"><summary>Original Deepgram transcript</summary><p className="transcript-text">{speech.result.text}</p><button className="button secondary" onClick={() => void navigator.clipboard.writeText(speech.result!.text).catch(() => setError('Could not copy the original transcript.'))}>Copy original</button></details>}</>}</section>}
+    {state.phase === 'ready' && state.clip && <div className="transcription-actions"><button className="button" disabled={transcribing || cleaning || inserting} onClick={() => void transcribeRecording()}>{transcribing ? 'Transcribing...' : speech.phase === 'completed' ? 'Transcribe again' : 'Transcribe recording'}</button>{transcribing && <button className="button secondary" onClick={() => transcription.cancel()}>Cancel transcription</button>}</div>}
+    {speech.phase !== 'idle' && <section className="transcript-panel" aria-label="Deepgram transcript"><div role="status"><strong>{cleaning ? 'Cleaning with Gemini' : speech.phase === 'working' ? 'Transcribing' : speech.phase === 'completed' ? clean.result ? 'Cleaned text' : 'Deepgram transcript' : speech.phase === 'cancelled' ? 'Transcription cancelled' : 'Transcription unavailable'}</strong><p className={speech.phase === 'failed' ? 'error-message' : 'inline-help'}>{speech.message}</p></div>{clean.phase !== 'idle' && <p className={clean.phase === 'failed' ? 'error-message' : 'inline-help'} role="status">{clean.message}</p>}{speech.result?.text && <><p className="transcript-text">{outputText}</p><button className="button secondary" disabled={cleaning || inserting || !outputText} onClick={() => void navigator.clipboard.writeText(outputText).then(() => setError(''), () => setError('Could not copy the transcript.'))}><Copy size={14} />Copy {clean.result ? 'cleaned text' : 'transcript'}</button><div className="transcription-actions"><button className="button secondary" disabled={processing} onClick={() => void cleanupTranscript()}>{clean.result ? 'Clean up again' : clean.phase === 'failed' || clean.phase === 'cancelled' ? 'Retry cleanup' : 'Clean up transcript'}</button>{cleaning && <button className="button secondary" onClick={() => cleanup.cancel()}>Cancel cleanup</button>}</div>{clean.phase !== 'idle' && <details className="original-transcript"><summary>Original Deepgram transcript</summary><p className="transcript-text">{speech.result.text}</p><button className="button secondary" onClick={() => void navigator.clipboard.writeText(speech.result!.text).catch(() => setError('Could not copy the original transcript.'))}>Copy original</button></details>}</>}</section>}
+    {insertion.phase !== 'idle' && <div role="status" className={insertion.phase === 'failed' ? 'error-message' : 'inline-help'}><p>{insertion.message}</p>{inserting && <button className="button secondary" onClick={() => delivery.cancel()}>Stop insertion</button>}</div>}
     {error && <p className="error-message" role="alert">{error}</p>}
     <p className="recording-footnote">Up to 5 minutes. The preview stays in memory until you replace it, discard it, or close the app. Audio and transcripts are not added to dictation history. Cloud transcription sends audio to Deepgram; enabled cleanup sends transcript text to Google Gemini. These calls use the provider quotas or credits; retries happen only when you request them.</p>
   </section>;

@@ -1,3 +1,4 @@
+import type { DeliveryRequest, DeliveryResult } from './delivery';
 import type { CleanupRequest, CleanupResult } from './cleanup';
 import type { TranscriptionRequest, Transcript, TranscriptionStatus } from './transcription';
 import type { RecordingState } from './recording';
@@ -9,6 +10,13 @@ export interface DayActivity { date: string; words: number }
 export interface Snapshot { preferences: Preferences; history: HistoryEntry[]; activity: DayActivity[]; totalWords: number; recordingCount: number; totalDurationMs: number }
 export interface RuntimeStatus { desktop: boolean; helper: boolean; api: boolean; auth: boolean; stt: boolean; cleanup: boolean }
 export interface DesktopBridge {
+  setWindowTheme(theme: 'light' | 'dark'): Promise<void>;
+  copyOverlayText(noticeId: string): Promise<void>;
+  resizeOverlay(height: number): Promise<void>;
+  openSettings(): Promise<void>;
+  onOpenSettings(listener: () => void): () => void;
+  deliverText(request: DeliveryRequest): Promise<DeliveryResult>;
+  cancelDelivery(sessionId: string): Promise<void>;
   cleanupTranscript(request: CleanupRequest): Promise<{ ok: true; result: CleanupResult } | { ok: false; code: string; message: string }>;
   transcribeAudio(request: TranscriptionRequest): Promise<{ ok: true; result: Transcript } | { ok: false; code: string; message: string }>;
   cancelTranscription(requestId: string): Promise<void>;

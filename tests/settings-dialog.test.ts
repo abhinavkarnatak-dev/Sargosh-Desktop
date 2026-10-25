@@ -21,7 +21,6 @@ afterEach(async () => {
 async function render() {
   await act(async () => root.render(createElement(StrictMode, null, createElement(SettingsDialog, {
     preferences: DEFAULT_PREFERENCES,
-    runtime: { desktop: false, helper: false, api: false, stt: false, auth: false, cleanup: false },
     onSave: async () => {}, onClose
   }))));
   const dialog = host.querySelector('dialog')!;

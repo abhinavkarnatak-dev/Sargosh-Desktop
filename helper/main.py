@@ -82,6 +82,14 @@ def main():
             print(json.dumps(payload), flush=True)
 
     native = WindowsService(lambda event, data: write({'event': event, 'data': data}))
+    delivery_threads = []
+    def deliver(request):
+        try:
+            result = native.call('insert-text', request.get('params', {}))
+            write({'id': request['id'], 'result': result})
+        except Exception:
+            write({'id': request.get('id'), 'error': 'Text insertion could not complete'})
+
     for line in sys.stdin:
         request = {}
         try:
@@ -91,6 +99,14 @@ def main():
             params = request.get('params', {})
             if not isinstance(params, dict):
                 raise ValueError('Invalid parameters')
+            if method == 'windows.insert-text':
+                delivery_threads = [thread for thread in delivery_threads if thread.is_alive()]
+                if delivery_threads:
+                    raise ValueError('Insertion is already running')
+                thread = threading.Thread(target=deliver, args=(request,), daemon=True)
+                delivery_threads.append(thread)
+                thread.start()
+                continue
             result = native.call(method[8:], params) if method.startswith('windows.') else store.handle(method, params)
             response = {'id': request['id'], 'result': result}
         except Exception:

@@ -79,6 +79,24 @@ class UIAutomationTests(unittest.TestCase):
         self.assertTrue(instance.capture(element).protected)
         self.assertEqual(instance.targets, {})
 
+    def test_real_unicode_text_is_forwarded_without_using_the_clipboard(self):
+        element = Element(); instance = backend(element); target = instance.capture(element)
+        instance._send_text = Mock(); instance.insert_text(target, 'Hello, नमस्ते 👋')
+        self.assertEqual(instance._send_text.call_args.args[0], 'Hello, नमस्ते 👋')
+
+    def test_field_that_becomes_readonly_is_rejected_before_typing(self):
+        element = Element(); instance = backend(element); target = instance.capture(element)
+        element.value_readonly = True; instance._send_text = Mock()
+        with self.assertRaises(ValueError): instance.insert_text(target, 'Hello')
+        instance._send_text.assert_not_called()
+
+    def test_cancellation_before_delivery_never_types(self):
+        import threading
+        element = Element(); instance = backend(element); target = instance.capture(element)
+        cancelled = threading.Event(); cancelled.set(); instance._send_text = Mock()
+        with self.assertRaises(ValueError): instance.insert_text(target, 'Hello', cancelled)
+        instance._send_text.assert_not_called()
+
     def test_focus_must_match_before_keyboard_delivery(self):
         element = Element()
         instance = backend(Element())

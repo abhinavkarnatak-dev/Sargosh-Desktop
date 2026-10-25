@@ -2,15 +2,17 @@
 
 Sargosh is a Windows dictation companion designed to turn natural speech into text in the apps you use. Its interface brings together a floating dictation control, a local recording history, and simple usage insights.
 
-The source provides a Windows desktop workspace with light and dark themes, a floating recording control, local audio playback, Deepgram transcription, and optional Gemini Flash-Lite cleanup. An opt-in Windows input test checks clipboard-free delivery of a fixed sentence. Account sign-in, persistent completed-dictation history, and automatic transcript insertion are not available in this build.
+The source provides a Windows desktop workspace with light and dark themes, a floating recording control, local audio playback, Deepgram transcription, and optional Gemini Flash-Lite cleanup. An opt-in Windows input test checks clipboard-free delivery of a fixed sentence. Finished desktop dictations can insert text directly into the saved input without using the clipboard. Account sign-in and persistent completed-dictation history are not available in this build.
 
 ## Using the desktop workspace
 
+- The top bar holds the sidebar toggle, a Light/Dark/System theme menu, and native Windows minimize, maximize, and close controls. Its empty area can be dragged to move the window, and its colors follow the app theme. The theme button uses the native window-control bounds to keep a small gap beside Minimize at different display scales.
+- The sidebar expands smoothly with fading labels. Its logo and navigation icons stay aligned, with Settings anchored at the bottom.
 - **Dictation** is the home for transcripts and original recordings once dictation is connected.
 - **Insights** shows total words, recording count, average words per minute, and daily activity. A day's tooltip contains only its date and word count.
 - **Settings** contains theme and microphone preferences and a microphone test. While Settings is open, the background stays still and cannot be interacted with. Click outside the dialog, press Escape, or use its close button to return.
 - The tray icon reopens Sargosh. Closing the main window hides it; choose **Quit Sargosh** from the tray menu to exit.
-- The floating pill expands on hover. Its microphone button opens the main app until recording shortcuts are enabled; it then starts hands-free recording. The grip moves the control. After you finish speaking, the control keeps the audio dots and shows a small loader on their right while your text is prepared. It does not display processing-stage names or cancel buttons during this step.
+- The floating pill expands on hover. Its microphone button opens the main app until recording shortcuts are enabled; it then starts hands-free recording. The grip moves the control. After you finish speaking, the control keeps the audio dots and shows a small loader on their right while your text is prepared. It does not display processing-stage names or cancel buttons during this step. Microphone warnings, no-speech results, and cancellation messages appear in a dismissible card above the pill. A card that opens Sargosh or microphone settings closes when that action succeeds; the pill stays visible. If text cannot be inserted, the card shows the prepared text and a Copy button.
 - The microphone level test processes sound levels on your computer. It does not save or upload audio.
 - **Check your recording** captures a temporary local clip with start, finish, cancel, playback, and discard controls.
 
@@ -75,7 +77,7 @@ Microphone access starts when you begin a recording, including the brief shortcu
 
 Each session is limited to 5 minutes and 25 MiB. No microphone activity for several seconds produces a level warning, not a speech-recognition result. Permission failures, a disconnected microphone, empty output, and audio finalization timeouts are reported without uploading or retrying the audio. Changing the selected microphone applies to the next recording.
 
-Only the latest finished clip is kept in memory. A new recording replaces it; **Discard audio**, a page reload, or app exit removes it. These clips are not written to SQLite or counted in Insights. They are sent to Deepgram only when you request transcription or enable automatic transcription; enabled cleanup sends the recognized transcript text to Gemini, not the audio. The saved input target is retained for future transcription delivery, but recording mode does not insert the fixed test sentence.
+Only the latest finished clip is kept in memory. A new recording replaces it; **Discard audio**, a page reload, or app exit removes it. These clips are not written to SQLite or counted in Insights. They are sent to Deepgram only when you request transcription or enable automatic transcription; enabled cleanup sends the recognized transcript text to Gemini, not the audio. Desktop recording sessions retain their saved input for direct transcript delivery. Recording mode does not insert the fixed test sentence.
 
 The main renderer owns one microphone and recorder. The overlay receives state and sends commands through Electron; it never opens a second recorder. On Windows, a small native mouse-activation hook lets its buttons receive clicks without taking keyboard focus from your input. The overlay Cancel button stops an active recording. Processing can still be cancelled from the main recording panel. Finish stops microphone capture immediately and waits for both the final audio and the saved destination before making the clip available. If a control cannot reach the recording window, the overlay shows a restart message. The main renderer's background timer throttling is disabled so hiding it does not suspend recording controls. Reloading the owner, losing Windows input access, or putting the computer to sleep cancels active recording and disarms shortcuts.
 
@@ -83,7 +85,7 @@ The main renderer owns one microphone and recorder. The overlay receives state a
 
 Record and finish a clip, then choose **Transcribe recording**. The transcript appears below the playback controls. Alternatively, turn on **Transcribe automatically after recording** before starting; finishing either shortcut mode then starts transcription. Automatic transcription is off initially, so checking recording and playback alone does not use provider credits.
 
-Choose English, Hindi, or multilingual recognition on Dictation or in Settings > General > My languages. These choices use Nova-3. Multilingual mode includes English and Hindi code-switching; it does not guarantee Romanized Hinglish output or translate between languages. Language and automatic-transcription choices currently last for the page session.
+Choose English, Hindi, or Hinglish on Dictation or in Settings > General > My languages. Language and microphone menus follow the selected light or dark theme and support keyboard navigation. These choices use Nova-3. Multilingual mode includes English and Hindi code-switching; it does not guarantee Romanized Hinglish output or translate between languages. Language and automatic-transcription choices currently last for the page session.
 
 The flow is recording > final audio chunk > local Fastify API > Deepgram > transcript display. Browser preview uses Vite's same-origin `/api` proxy. Electron forwards audio through its restricted main-process bridge to the local API, so packaged file pages do not need direct browser access to the API. Container audio is uploaded as binary data; the server does not incorrectly label WebM/Opus as raw PCM.
 
@@ -107,7 +109,21 @@ If Gemini is unavailable, blocked, rate-limited, times out, or returns incomplet
 
 The local API checks its session token, bounds request size and concurrency, and keeps at most 32 successful cleanup responses in memory for 5 minutes to avoid duplicate calls for identical request IDs. Transcript text and cleaned text are not saved to disk or request logs. Google receives the transcript and language hint; its data-use rules depend on the project and billing tier. Review [Gemini API terms](https://ai.google.dev/gemini-api/terms) and [Gemini pricing and data-use information](https://ai.google.dev/gemini-api/docs/pricing).
 
-Cleanup does not type into other apps or save completed dictations to history. Local previews are removed when replaced, discarded, reloaded, or closed, while the bounded backend deduplication caches expire independently.
+Cleanup produces text; a separate Windows delivery step inserts it into the saved input. Completed dictations are not yet saved to history. Local previews are removed when replaced, discarded, reloaded, or closed, while the bounded backend deduplication caches expire independently.
+
+## Insert into a Windows textbox
+
+Open the Electron app, enable recording shortcuts, and enable **Transcribe automatically after recording** for the complete hands-free flow. Click a writable textbox in another app, then dictate with either hold or hands-free mode. Finishing the recording prepares the text and inserts it into the saved input. With automatic transcription off, **Transcribe recording** starts the same processing and delivery steps for the current desktop recording.
+
+The latest writable input focused during recording becomes the destination. Finishing freezes that destination, so selecting another field while text is being prepared does not redirect it. The app activates the saved field before typing. Insertion takes place at its current caret and replaces selected text. It does not press a Send button, synthesize a keyboard Enter command, or use the clipboard. Browser-preview recordings remain local previews and do not type into other apps.
+
+When cleanup is enabled, only successfully cleaned text is inserted. Cleanup failure or cancellation leaves the original text available and does not automatically insert it. A successful cleanup retry can deliver the text if that recording has not already attempted insertion. With cleanup disabled, the original transcript is inserted. Empty recognition results do not insert anything.
+
+The overlay keeps its dots and loader until delivery finishes. While text is being prepared or inserted, additional recording shortcuts are ignored. Text is paced character by character for editor compatibility; longer text takes longer to insert. The main recording panel shows the delivery result and provides **Stop insertion**. Discarding the clip, reloading the app, or quitting also stops delivery. Cancellation cannot remove characters already sent.
+
+Every recording permits one insertion attempt. Repeated completion events, **Clean up again**, and **Transcribe again** do not insert a second copy. If delivery fails or only partly completes, the app retains the text and does not automatically retry. Check the destination before taking further action. No text is saved to the clipboard automatically. If there is no usable textbox or delivery cannot be confirmed, a card above the overlay shows the prepared text and an explicit **Copy text** button. It reports **Copied** on success and explains a failed copy. Dismissal or a new recording hides the card; the transcript remains available in the main panel.
+
+Password fields, read-only fields, closed windows, and unavailable or hidden controls are excluded. Switching focus, holding keyboard modifiers, or changing keyboard layout during insertion stops it to avoid typing into another field. Some editors and background browser tabs do not expose a usable Windows input control. A clear result appears in the main panel and the transcript remains available. Windows also restricts delivery between apps running with different permissions.
 
 ## Check Windows input behavior
 
