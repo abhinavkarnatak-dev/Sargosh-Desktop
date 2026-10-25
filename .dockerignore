@@ -1,0 +1,12 @@
+**
+!src/
+!src/server/
+!src/server/**
+!src/shared/
+!src/shared/**
+!deploy/
+!deploy/api/
+!deploy/api/package.json
+!deploy/api/package-lock.json
+!tsconfig.server.json
+!Dockerfile.api

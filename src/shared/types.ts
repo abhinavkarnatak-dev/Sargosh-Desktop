@@ -11,6 +11,7 @@ export interface DayActivity { date: string; words: number }
 export interface Snapshot { preferences: Preferences; history: HistoryEntry[]; activity: DayActivity[]; totalWords: number; recordingCount: number; totalDurationMs: number }
 export interface RuntimeStatus { desktop: boolean; helper: boolean; api: boolean; auth: boolean; stt: boolean; cleanup: boolean }
 export interface DesktopBridge {
+  usage?(): Promise<import('./usage').AccountUsage|null>;
   authState(): Promise<import('./auth').AuthState>;
   onAuthState(listener: (state: import('./auth').AuthState) => void): () => void;
   sendEmailCode(email: string): Promise<void>;

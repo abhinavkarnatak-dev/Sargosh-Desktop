@@ -24,3 +24,9 @@ describe('backend-only cloud configuration', () => {
   });
 
 });
+
+it('requires complete hosted configuration and never silently falls back to local mode',()=>{
+ expect(()=>serverSettings({SARGOSH_API_MODE:'hosted'})).toThrow();
+ const valid={SARGOSH_API_MODE:'hosted',SARGOSH_PUBLIC_API_URL:'https://api.example.com',SUPABASE_URL:'https://fixture.supabase.co',SUPABASE_PUBLISHABLE_KEY:'sb_publishable_fixture12345',SUPABASE_SERVER_KEY:'sb_secret_fixture',DEEPGRAM_API_KEY:'fixture-deepgram-123456',GEMINI_API_KEY:'fixture-gemini-123456'};
+ expect(serverSettings(valid)).toMatchObject({hostedMode:true,allowedHosts:['api.example.com']});expect(()=>serverSettings({...valid,SARGOSH_PUBLIC_API_URL:'http://api.example.com'})).toThrow();
+});

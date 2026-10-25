@@ -33,3 +33,5 @@ Thumbs.db
 
 supabase/.temp/
 supabase/.branches/
+
+dist-api/

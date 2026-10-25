@@ -11,6 +11,7 @@ async function authCall(channel: string, value?: unknown) {
   }
 }
 const bridge: DesktopBridge = {
+  usage: () => authCall('sargosh:usage'),
   authState: () => authCall('sargosh:auth-state'),
   onAuthState: listener => { const handler = (_event: Electron.IpcRendererEvent, state: import('../shared/auth').AuthState) => listener(state); ipcRenderer.on('sargosh:auth-state', handler); return () => { ipcRenderer.removeListener('sargosh:auth-state', handler); }; },
   sendEmailCode: email => authCall('sargosh:auth-send-code', email),

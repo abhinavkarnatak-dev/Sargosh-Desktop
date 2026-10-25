@@ -1,3 +1,4 @@
+import { createHostedServer,type HostedOptions } from './hosted';
 import { sessionVerifier } from './auth';
 import Fastify from 'fastify';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -8,8 +9,9 @@ import { CLEANUP_PROMPT_VERSION } from './cleanup-prompt';
 import { cleanTranscript, CleanupError } from './gemini';
 import { recognizeAudio, SpeechError } from './deepgram';
 
-interface ServerOptions { authConfig?: { url: string; key: string }; verifySession?: (token: string) => Promise<string | null>; apiKey?: string; localMode?: boolean; fetcher?: typeof fetch; geminiApiKey?: string; geminiModel?: CleanupModel; geminiFetcher?: typeof fetch }
+interface ServerOptions extends HostedOptions { hostedMode?: boolean; authConfig?: { url: string; key: string }; verifySession?: (token: string) => Promise<string | null>; apiKey?: string; localMode?: boolean; fetcher?: typeof fetch; geminiApiKey?: string; geminiModel?: CleanupModel; geminiFetcher?: typeof fetch }
 export function createServer(options: ServerOptions = {}) {
+  if(options.hostedMode) return createHostedServer(options);
   const server = Fastify({ logger: false, bodyLimit: MAX_AUDIO_BYTES, requestTimeout: 90_000 });
   const verifySession = options.verifySession ?? (options.authConfig ? sessionVerifier(options.authConfig) : undefined);
   const userIds = new WeakMap<object, string>();

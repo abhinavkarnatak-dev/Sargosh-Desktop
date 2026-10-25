@@ -1,3 +1,5 @@
+import { validAccountUsage } from '../shared/usage';
+import { apiEndpoint } from '../shared/api-endpoint';
 import { readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { DesktopAuth } from './auth';
@@ -39,7 +41,12 @@ let accountChanging = false;
 let historyRetry: string | null = null;
 const finishedRecordings = new Map<string, { createdAt: string; durationMs: number; bytes: number; mimeType: string }>();
 const helper = new Helper();
-const transcriber = new DesktopTranscriber(async () => { if (!auth) throw new Error('Sign in to use cloud dictation.'); return auth.accessToken(); });
+let desktopEnvironment:Record<string,string|undefined>={...process.env};
+try{desktopEnvironment={...parseEnv(readFileSync(path.join(root,'.env'),'utf8')),...process.env};}catch{}
+if(!dev){try{desktopEnvironment={...JSON.parse(readFileSync(path.join(root,'dist','desktop-config.json'),'utf8')),...process.env};}catch{}}
+if(!dev&&!desktopEnvironment.SARGOSH_API_URL)throw new Error('The installed app is missing its hosted API configuration.');
+const apiBase=apiEndpoint(desktopEnvironment.SARGOSH_API_URL??'http://127.0.0.1:4318');
+const transcriber = new DesktopTranscriber(async () => { if (!auth) throw new Error('Sign in to use cloud dictation.'); return auth.accessToken(); },apiBase);
 const recordingCommands = new RecordingCommands();
 let transcriptionStatus: TranscriptionStatus = { phase: 'idle', message: '' };
 let recordingState: RecordingState = { ...INITIAL_RECORDING_STATE };
@@ -118,7 +125,7 @@ if (ownsLock) {
       ipcMain.handle(channel, (event, value) => { checkSender(event); if (event.sender !== mainWindow?.webContents || quitting || accountChanging) throw new Error('History is unavailable.'); if (channel.startsWith('sargosh:history-') || channel === 'sargosh:delete') requireAccount(); return work(value); });
     }
     let authConfig;
-    try { authConfig = publicAuthConfig({ ...parseEnv(readFileSync(path.join(root, '.env'), 'utf8')), ...process.env }); } catch { authConfig = publicAuthConfig(process.env); }
+    authConfig=publicAuthConfig(desktopEnvironment);
     authStorage = new AuthStorage(path.join(app.getPath('userData'), 'auth-session.bin'), safeStorage);
     auth = new DesktopAuth(authConfig, authStorage, async userId => {
       accountChanging = true;
@@ -147,6 +154,13 @@ if (ownsLock) {
     function authAction(channel: string, work: (value: any) => unknown) {
       ownerHandle(channel, value => { if (recordingBusy(recordingState) || transcriber.busy || activeDelivery || historyRetry) throw new Error('Finish the current dictation first.'); return work(value); });
     }
+    ownerHandle('sargosh:usage',async()=>{
+      requireAccount();if(!apiBase.startsWith('https://'))return null;
+      const response=await fetch(apiBase+'/v1/usage',{headers:{Authorization:'Bearer '+await auth!.accessToken()},redirect:'error',cache:'no-store',signal:AbortSignal.timeout(100000)});
+      const value=await response.json().catch(()=>null);
+      if(!response.ok||!validAccountUsage(value))throw new Error('Could not load your usage allowance. Please try again.');
+      return value;
+    });
     ownerHandle('sargosh:auth-state', () => auth!.snapshot());
     authAction('sargosh:auth-send-code', email => auth!.sendCode(email));
     authAction('sargosh:auth-verify-code', value => auth!.verifyCode(value?.email, value?.code));
@@ -331,7 +345,7 @@ if (ownsLock) {
     });
     handle('sargosh:status', async (): Promise<RuntimeStatus> => {
       try {
-        const response = await fetch('http://127.0.0.1:4318/v1/readiness', { signal: AbortSignal.timeout(1500) });
+        const response = await fetch(apiBase+'/v1/readiness', { signal: AbortSignal.timeout(1500) });
         const data = await response.json() as { auth: boolean; stt: boolean; cleanup: boolean };
         return { desktop: true, helper: helper.ready, api: response.ok, auth: data.auth === true, stt: data.stt === true, cleanup: data.cleanup === true };
       } catch { return { desktop: true, helper: helper.ready, api: false, auth: false, stt: false, cleanup: false }; }

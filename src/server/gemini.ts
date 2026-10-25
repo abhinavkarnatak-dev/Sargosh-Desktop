@@ -19,8 +19,9 @@ async function readResponse(response: Response): Promise<unknown> {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch { throw new CleanupError('GEMINI_RESPONSE', 'Gemini returned an unreadable response. The original transcript is available.'); }
 }
+export const cleanupOutputLimit = (text: string) => Math.min(16384, Math.max(512, text.length * 2 + 128));
 export async function cleanTranscript(options: {
-  apiKey: string; model: CleanupModel; text: string; language: SpeechLanguage; signal: AbortSignal; fetcher?: typeof fetch;
+  apiKey: string; model: CleanupModel; text: string; language: SpeechLanguage; signal: AbortSignal; fetcher?: typeof fetch; onUsage?: (usage: {inputTokens:number;outputTokens:number}) => void;
 }): Promise<CleanupResult> {
   if (!options.text.trim() || options.text.length > MAX_CLEANUP_CHARS) throw new CleanupError('CLEANUP_INPUT', 'This transcript is empty or exceeds the cleanup limit.', 400);
   const timeout = AbortSignal.timeout(20_000);
@@ -35,7 +36,7 @@ export async function cleanTranscript(options: {
         generationConfig: {
           responseMimeType: 'application/json',
           responseJsonSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
-          maxOutputTokens: Math.min(16384, Math.max(512, options.text.length * 2 + 128))
+          maxOutputTokens: cleanupOutputLimit(options.text)
         }
       })
     });
@@ -48,9 +49,12 @@ export async function cleanTranscript(options: {
       throw new CleanupError('GEMINI_UNAVAILABLE', 'Gemini is temporarily unavailable. The original transcript is available.');
     }
     const data = await readResponse(response) as {
+      usageMetadata?: {promptTokenCount?:number;totalTokenCount?:number};
       promptFeedback?: { blockReason?: unknown };
       candidates?: { finishReason?: string; content?: { parts?: { text?: unknown; thought?: boolean; functionCall?: unknown }[] } }[];
     };
+    const usage=data?.usageMetadata;
+    if(Number.isSafeInteger(usage?.promptTokenCount)&&Number.isSafeInteger(usage?.totalTokenCount)&&usage!.promptTokenCount!>=0&&usage!.totalTokenCount!>=usage!.promptTokenCount!) options.onUsage?.({inputTokens:usage!.promptTokenCount!,outputTokens:usage!.totalTokenCount!-usage!.promptTokenCount!});
     const candidate = data?.candidates?.[0];
     if (data?.promptFeedback?.blockReason || candidate?.finishReason === 'SAFETY' || candidate?.finishReason === 'RECITATION') throw new CleanupError('GEMINI_BLOCKED', 'Gemini could not clean this transcript. The original is available.');
     if (!candidate || candidate.finishReason !== 'STOP') throw new CleanupError('GEMINI_INCOMPLETE', 'Gemini did not finish the cleanup. The original transcript is available.');

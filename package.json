@@ -10,7 +10,7 @@
     "dev:ui": "vite --host 127.0.0.1",
     "dev:api": "tsx watch src/server/index.ts",
     "build": "tsc -p tsconfig.main.json && vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p supabase/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p supabase/tsconfig.json && tsc --noEmit -p tsconfig.server.json",
     "test": "vitest run && python -m unittest discover -s helper -p test_*.py",
     "test:watch": "vitest",
     "make": "npm run build && electron-forge make",
@@ -19,7 +19,10 @@
     "dev:desktop": "tsc -p tsconfig.main.json && node scripts/launch-desktop.mjs",
     "test:windows": "tsx scripts/windows-proof.ts",
     "test:windows:insert": "tsx scripts/windows-proof.ts --insert-on-finish",
-    "build:welcome": "node scripts/build-welcome-template.mjs"
+    "build:welcome": "node scripts/build-welcome-template.mjs",
+    "build:api": "tsc -p tsconfig.server.json",
+    "start:api": "node dist-api/server/index.js",
+    "build:desktop-config": "node scripts/build-desktop-config.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
@@ -38,6 +41,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^45.0.0",
+    "ffmpeg-static": "^5.3.0",
     "happy-dom": "^21.0.4",
     "tsx": "^4.20.0",
     "typescript": "~5.9.3",
