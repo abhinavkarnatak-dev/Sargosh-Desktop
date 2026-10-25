@@ -1,3 +1,4 @@
+import { AccountPanel } from './AccountPanel';
 import { useModalDialog } from './modal';
 import { ThemedSelect } from './ThemedSelect';
 import { useEffect, useRef, useState } from 'react';
@@ -47,8 +48,7 @@ export function SettingsDialog({ preferences, onSave, onClose }: { preferences: 
         <MicrophoneTest disabled={recordingBusy(recordingState)} microphoneId={preferences.microphoneId} onDevices={setDevices} />
       </> : <>
         <p className="eyebrow">YOUR SPACE</p><h2>Account</h2><p className="subtitle">Your profile and sign-in preferences.</p>
-        <div className="account-placeholder"><div className="avatar"><User size={28} strokeWidth={1.5} /></div><h3>Your account belongs here.</h3><p>Google sign-in and email verification will be connected through Supabase. No account is signed in in this development build.</p><button className="button" disabled>Continue with Google</button><button className="button secondary" disabled>Continue with email</button></div>
-        <p className="privacy-footnote">Recordings and transcripts stay on this computer. Account and usage services are separate from your local history.</p>
+        <AccountPanel />
       </>}
     </div></div>
   </dialog>;

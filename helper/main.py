@@ -4,12 +4,18 @@ import json
 import sqlite3
 import sys
 import threading
+import re
 from native_control import WindowsService
 from pathlib import Path
 
 
 class Store:
     def __init__(self, path):
+        self.base = Path(path).parent
+        self.path = Path(path)
+        self.open_database(path)
+
+    def open_database(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path)
         self.db.row_factory = sqlite3.Row
@@ -28,6 +34,30 @@ class Store:
             if name not in columns:
                 self.db.execute(f'ALTER TABLE history ADD COLUMN {name} {definition}')
         self.db.commit()
+
+    def select_account(self, user_id):
+        if user_id is not None and (not isinstance(user_id, str) or not re.fullmatch(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}', user_id)):
+            raise ValueError('Invalid account')
+        owner_file = self.base / 'legacy-owner.json'
+        owner = json.loads(owner_file.read_text(encoding='utf-8')) if owner_file.exists() else None
+        if owner is not None and (not isinstance(owner, str) or not re.fullmatch(r'[a-f0-9-]{36}', owner)):
+            raise ValueError('Invalid local account owner')
+        claim = user_id is not None and owner is None
+        directory = self.base if user_id is not None and (owner == user_id or claim) else self.base / ('accounts/' + user_id if user_id else 'signed-out')
+        next_path = directory / 'history.sqlite3'
+        previous = self.path
+        if next_path != previous:
+            self.db.close()
+            try:
+                self.open_database(next_path)
+                self.path = next_path
+            except Exception:
+                self.open_database(previous)
+                raise
+        if claim:
+            with owner_file.open('x', encoding='utf-8') as file:
+                json.dump(user_id, file)
+        return {'directory': str(directory.resolve())}
 
     def preferences(self, update=None):
         if update is not None:
@@ -82,6 +112,7 @@ class Store:
         return {'entries': [self.history_row(row) for row in rows[:50]], 'hasMore': len(rows) > 50}
 
     def handle(self, method, params):
+        if method == 'account.select': return self.select_account(params.get('userId'))
         if method == 'ping': return {'ready': True, 'platform': sys.platform, 'capabilities': ['preferences', 'history', 'insights']}
         if method == 'snapshot': return self.snapshot()
         if method == 'history.get': return self.history_get(params['id'])

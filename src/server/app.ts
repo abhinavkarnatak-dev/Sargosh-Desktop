@@ -1,3 +1,4 @@
+import { sessionVerifier } from './auth';
 import Fastify from 'fastify';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { MAX_AUDIO_BYTES } from '../shared/recording';
@@ -7,9 +8,11 @@ import { CLEANUP_PROMPT_VERSION } from './cleanup-prompt';
 import { cleanTranscript, CleanupError } from './gemini';
 import { recognizeAudio, SpeechError } from './deepgram';
 
-interface ServerOptions { apiKey?: string; localMode?: boolean; fetcher?: typeof fetch; geminiApiKey?: string; geminiModel?: CleanupModel; geminiFetcher?: typeof fetch }
+interface ServerOptions { authConfig?: { url: string; key: string }; verifySession?: (token: string) => Promise<string | null>; apiKey?: string; localMode?: boolean; fetcher?: typeof fetch; geminiApiKey?: string; geminiModel?: CleanupModel; geminiFetcher?: typeof fetch }
 export function createServer(options: ServerOptions = {}) {
   const server = Fastify({ logger: false, bodyLimit: MAX_AUDIO_BYTES, requestTimeout: 90_000 });
+  const verifySession = options.verifySession ?? (options.authConfig ? sessionVerifier(options.authConfig) : undefined);
+  const userIds = new WeakMap<object, string>();
   const token = randomBytes(32).toString('hex');
   const configured = options.localMode === true && Boolean(options.apiKey);
   const cleanupConfigured = options.localMode === true && Boolean(options.geminiApiKey);
@@ -37,7 +40,7 @@ export function createServer(options: ServerOptions = {}) {
   });
   server.addContentTypeParser(/^audio\/(webm|ogg|wav|mpeg|mp4)(?:\s*;.*)?$/i, { parseAs: 'buffer', bodyLimit: MAX_AUDIO_BYTES }, (_request, body, done) => done(null, body));
   server.get('/health', async () => ({ status: 'ok', service: 'sargosh-api', version: '0.1.0' }));
-  server.get('/v1/readiness', async () => ({ auth: false, stt: configured, cleanup: cleanupConfigured }));
+  server.get('/v1/readiness', async () => ({ auth: Boolean(verifySession), stt: configured, cleanup: cleanupConfigured }));
   server.get('/v1/local-session', async (_request, reply) => {
     if (!configured && !cleanupConfigured) return reply.code(503).send({ code: 'NOT_CONFIGURED', message: 'Enable local transcription and configure the backend Deepgram key first.' });
     return { token };
@@ -46,6 +49,13 @@ export function createServer(options: ServerOptions = {}) {
     onRequest: async (request, reply) => {
       if (!configured) return reply.code(503).send({ code: 'NOT_CONFIGURED', message: 'Cloud transcription is not configured for local development.' });
       if (!validToken(request.headers['x-sargosh-token'])) return reply.code(401).send({ code: 'LOCAL_SESSION', message: 'The local API session expired. Try again.' });
+      if (verifySession) {
+        const authorization = request.headers.authorization;
+        const accessToken = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+        const userId = accessToken ? await verifySession(accessToken).catch(() => null) : null;
+        if (!userId) return reply.code(401).send({ code: 'AUTH_REQUIRED', message: 'Sign in again to use cloud dictation.' });
+        userIds.set(request, userId);
+      }
     }
   }, async (request, reply) => {
     const language = (request.query as { language?: unknown })?.language;
@@ -56,7 +66,8 @@ export function createServer(options: ServerOptions = {}) {
     const now = Date.now();
     for (const [id, item] of completed) if (now - item.time > 5 * 60_000) completed.delete(id);
     const fingerprint = createHash('sha256').update(language).update(mimeType).update(request.body).digest('hex');
-    const previous = completed.get(requestId);
+    const cacheId = (userIds.get(request) ?? 'local') + ':' + requestId;
+    const previous = completed.get(cacheId);
     if (previous) {
       if (previous.fingerprint !== fingerprint) return reply.code(409).send({ code: 'REQUEST_ID_REUSED', message: 'Use a new request ID for a different recording.' });
       return previous.result;
@@ -71,7 +82,7 @@ export function createServer(options: ServerOptions = {}) {
     try {
       const result = await recognizeAudio({ apiKey: options.apiKey!, audio: request.body, mimeType, language, signal: abort.signal, fetcher: options.fetcher });
       if (completed.size >= 32) completed.delete(completed.keys().next().value!);
-      completed.set(requestId, { time: Date.now(), fingerprint, result }); return result;
+      completed.set(cacheId, { time: Date.now(), fingerprint, result }); return result;
     } catch (error) {
       const failure = error instanceof SpeechError ? error : new SpeechError('TRANSCRIPTION_FAILED', 'Transcription failed. Try again later.');
       return reply.code(failure.status).send({ code: failure.code, message: failure.message });
@@ -84,6 +95,13 @@ export function createServer(options: ServerOptions = {}) {
     onRequest: async (request, reply) => {
       if (!cleanupConfigured) return reply.code(503).send({ code: 'CLEANUP_NOT_CONFIGURED', message: 'Configure GEMINI_API_KEY in the private backend .env. The original transcript is available.' });
       if (!validToken(request.headers['x-sargosh-token'])) return reply.code(401).send({ code: 'LOCAL_SESSION', message: 'The local API session expired. Try again.' });
+      if (verifySession) {
+        const authorization = request.headers.authorization;
+        const accessToken = typeof authorization === 'string' && authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+        const userId = accessToken ? await verifySession(accessToken).catch(() => null) : null;
+        if (!userId) return reply.code(401).send({ code: 'AUTH_REQUIRED', message: 'Sign in again to use cloud dictation.' });
+        userIds.set(request, userId);
+      }
     }
   }, async (request, reply) => {
     const body = request.body as { text?: unknown; language?: unknown } | null;
@@ -96,7 +114,8 @@ export function createServer(options: ServerOptions = {}) {
     const fingerprint = createHash('sha256').update(CLEANUP_PROMPT_VERSION).update(model).update(body.language).update(body.text).digest('hex');
     const now = Date.now();
     for (const [id, item] of cleanupCache) if (now - item.time > 5 * 60_000) cleanupCache.delete(id);
-    const previous = cleanupCache.get(requestId);
+    const cacheId = (userIds.get(request) ?? 'local') + ':' + requestId;
+    const previous = cleanupCache.get(cacheId);
     if (previous) {
       if (previous.fingerprint !== fingerprint) return reply.code(409).send({ code: 'REQUEST_ID_REUSED', message: 'Use a new request ID for a different cleanup.' });
       return previous.result;
@@ -111,7 +130,7 @@ export function createServer(options: ServerOptions = {}) {
     try {
       const result = await cleanTranscript({ apiKey: options.geminiApiKey!, model, text: body.text, language: body.language, signal: abort.signal, fetcher: options.geminiFetcher });
       if (cleanupCache.size >= 32) cleanupCache.delete(cleanupCache.keys().next().value!);
-      cleanupCache.set(requestId, { time: Date.now(), fingerprint, result }); return result;
+      cleanupCache.set(cacheId, { time: Date.now(), fingerprint, result }); return result;
     } catch (error) {
       const failure = error instanceof CleanupError ? error : new CleanupError('CLEANUP_FAILED', 'Cleanup failed. The original transcript is available.');
       return reply.code(failure.status).send({ code: failure.code, message: failure.message });

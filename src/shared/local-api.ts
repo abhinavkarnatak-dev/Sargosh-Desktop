@@ -5,7 +5,7 @@ import { MAX_AUDIO_BYTES } from './recording';
 export class LocalApiError extends Error {
   constructor(public code: string, message: string) { super(message); }
 }
-export async function transcribeViaLocalAPI(request: TranscriptionRequest, signal: AbortSignal, base = 'http://127.0.0.1:4318', fetcher: typeof fetch = fetch): Promise<Transcript> {
+export async function transcribeViaLocalAPI(request: TranscriptionRequest, signal: AbortSignal, base = 'http://127.0.0.1:4318', fetcher: typeof fetch = fetch, accessToken?: string): Promise<Transcript> {
   if (!isRequestId(request.requestId) || !isSpeechLanguage(request.language) || !audioType(request.mimeType) || !request.audio.byteLength || request.audio.byteLength > MAX_AUDIO_BYTES) {
     throw new LocalApiError('INVALID_REQUEST', 'The recording cannot be sent for transcription.');
   }
@@ -26,7 +26,7 @@ export async function transcribeViaLocalAPI(request: TranscriptionRequest, signa
     if (typeof session.token !== 'string' || !/^[a-f0-9]{64}$/.test(session.token)) throw new LocalApiError('LOCAL_SESSION', 'Could not open a local transcription session.');
     const result = await read(await fetcher(base + '/v1/transcriptions?language=' + request.language, {
       method: 'POST', signal: combined, redirect: 'error', headers: {
-        'Content-Type': request.mimeType, 'x-sargosh-token': session.token, 'x-sargosh-request-id': request.requestId
+        ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': request.mimeType, 'x-sargosh-token': session.token, 'x-sargosh-request-id': request.requestId
       }, body: request.audio
     })) as Partial<Transcript>;
     if (typeof result.text !== 'string' || result.text.length > 100_000 || result.language !== request.language || result.model !== 'nova-3' ||
@@ -43,7 +43,7 @@ export async function transcribeViaLocalAPI(request: TranscriptionRequest, signa
   }
 }
 
-export async function cleanupViaLocalAPI(request: CleanupRequest, signal: AbortSignal, base = 'http://127.0.0.1:4318', fetcher: typeof fetch = fetch): Promise<CleanupResult> {
+export async function cleanupViaLocalAPI(request: CleanupRequest, signal: AbortSignal, base = 'http://127.0.0.1:4318', fetcher: typeof fetch = fetch, accessToken?: string): Promise<CleanupResult> {
   if (!isRequestId(request.requestId) || !isSpeechLanguage(request.language) || typeof request.text !== 'string' || !request.text.trim() || request.text.length > MAX_CLEANUP_CHARS) {
     throw new LocalApiError('CLEANUP_INPUT', 'This transcript cannot be sent for cleanup. The original is available.');
   }
@@ -63,7 +63,7 @@ export async function cleanupViaLocalAPI(request: CleanupRequest, signal: AbortS
     if (typeof session?.token !== 'string' || !/^[a-f0-9]{64}$/.test(session.token)) throw new LocalApiError('LOCAL_SESSION', 'Could not open a local cleanup session.');
     const result = await read(await fetcher(base + '/v1/cleanup', {
       method: 'POST', signal: combined, redirect: 'error', headers: {
-        'Content-Type': 'application/json', 'x-sargosh-token': session.token, 'x-sargosh-request-id': request.requestId
+        ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json', 'x-sargosh-token': session.token, 'x-sargosh-request-id': request.requestId
       }, body: JSON.stringify({ text: request.text, language: request.language })
     })) as Partial<CleanupResult>;
     if (typeof result?.text !== 'string' || result.text.length > Math.max(512, request.text.length * 2 + 256) || !isCleanupModel(result.model)) throw new LocalApiError('LOCAL_API', 'The local API returned an invalid cleanup result.');

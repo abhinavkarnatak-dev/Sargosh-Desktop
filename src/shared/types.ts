@@ -11,6 +11,14 @@ export interface DayActivity { date: string; words: number }
 export interface Snapshot { preferences: Preferences; history: HistoryEntry[]; activity: DayActivity[]; totalWords: number; recordingCount: number; totalDurationMs: number }
 export interface RuntimeStatus { desktop: boolean; helper: boolean; api: boolean; auth: boolean; stt: boolean; cleanup: boolean }
 export interface DesktopBridge {
+  authState(): Promise<import('./auth').AuthState>;
+  onAuthState(listener: (state: import('./auth').AuthState) => void): () => void;
+  sendEmailCode(email: string): Promise<void>;
+  verifyEmailCode(email: string, code: string): Promise<void>;
+  signInGoogle(): Promise<void>;
+  cancelGoogleSignIn(): Promise<void>;
+  signOut(): Promise<void>;
+  updateProfile(firstName: string, lastName: string): Promise<void>;
   saveHistory(request: HistoryCapture): Promise<void>;
   updateHistory(request: HistoryResult): Promise<void>;
   listHistory(cursor?: HistoryCursor): Promise<HistoryPage>;

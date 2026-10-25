@@ -67,3 +67,10 @@ it('routes history actions through named channels and releases its update listen
   const handler = electron.on.mock.calls[0][1]; handler(); expect(changed).toHaveBeenCalledOnce();
   release(); expect(electron.remove).toHaveBeenCalledWith('sargosh:history-changed', handler);
 });
+
+it('exposes named account actions and a profile-only auth event without a raw-token getter', async () => {
+  await bridge.authState();await bridge.sendEmailCode('person@example.com');await bridge.verifyEmailCode('person@example.com','123456');await bridge.signInGoogle();await bridge.cancelGoogleSignIn();await bridge.updateProfile('Priya','Sharma');await bridge.signOut();
+  expect(electron.invoke).toHaveBeenCalledWith('sargosh:auth-verify-code',{email:'person@example.com',code:'123456'});expect(electron.invoke).toHaveBeenCalledWith('sargosh:auth-profile',{firstName:'Priya',lastName:'Sharma'});
+  expect(Object.keys(bridge).some(key=>/accessToken|refreshToken/i.test(key))).toBe(false);
+  const listener=vi.fn();const release=bridge.onAuthState(listener);const handler=electron.on.mock.calls[0][1];handler({}, {phase:'signed-out',user:null});expect(listener).toHaveBeenCalledWith({phase:'signed-out',user:null});release();expect(electron.remove).toHaveBeenCalledWith('sargosh:auth-state',handler);
+});

@@ -1,0 +1,4 @@
+project_id = "sargosh-desktop"
+
+[functions.send-welcome]
+verify_jwt = true

@@ -1,3 +1,7 @@
+import { useAuth } from './auth';
+import { SignIn } from './SignIn';
+import { hasProfileName, type AccountUser } from '../shared/auth';
+import { ProfileSetup } from './ProfileSetup';
 import { NoticeToast } from './NoticeToast';
 import { HistoryList } from './HistoryList';
 import { ThemeMenu } from './ThemeMenu';
@@ -11,6 +15,12 @@ import { Insights } from './Insights';
 import { SettingsDialog } from './SettingsDialog';
 
 export function App() {
+  const auth = useAuth();
+  if (window.sargosh?.authState && auth.phase !== 'signed-in') return <SignIn state={auth} />;
+  if (window.sargosh?.authState && auth.user && !hasProfileName(auth.user)) return <ProfileSetup key={auth.user.id} user={auth.user} />;
+  return <Workspace key={auth.user?.id ?? 'preview'} account={auth.user} />;
+}
+function Workspace({ account }: { account: AccountUser | null }) {
   const [page, setPage] = useState<'dictation' | 'insights'>('dictation');
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
   const [settings, setSettings] = useState(false);
@@ -71,7 +81,7 @@ export function App() {
       <div className="main-scroll" tabIndex={0} aria-label="Page content">
       <div className="page-content">
         {page === 'dictation' ? <>
-          <div className="page-heading"><div><p className="eyebrow">DICTATION</p><h1>Welcome to Sargosh</h1><p className="subtitle">Speak naturally. Make room for your thoughts.</p></div></div>
+          <div className="page-heading"><div><p className="eyebrow">DICTATION</p><h1>{account?.firstName ? 'Welcome back, ' + account.firstName : 'Welcome to Sargosh'}</h1><p className="subtitle">Speak naturally. Make room for your thoughts.</p></div></div>
           <div className="dictation-stats">
             <section className="dictation-stat"><Mic size={19} strokeWidth={1.5} /><div><span className="stat-number">{snapshot.totalWords.toLocaleString()}</span><span className="stat-label">total words dictated</span></div></section>
             <section className="dictation-stat"><BarChart3 size={19} strokeWidth={1.5} /><div><span className="stat-number">{wordsPerMinute(snapshot.totalWords, snapshot.totalDurationMs)}<small>wpm</small></span><span className="stat-label">average dictation speed</span></div></section>

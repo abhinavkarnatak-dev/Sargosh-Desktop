@@ -30,3 +30,6 @@ Thumbs.db
 *.key
 *.pfx
 *.p12
+
+supabase/.temp/
+supabase/.branches/

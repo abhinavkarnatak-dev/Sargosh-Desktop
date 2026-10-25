@@ -10,7 +10,7 @@
     "dev:ui": "vite --host 127.0.0.1",
     "dev:api": "tsx watch src/server/index.ts",
     "build": "tsc -p tsconfig.main.json && vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p supabase/tsconfig.json",
     "test": "vitest run && python -m unittest discover -s helper -p test_*.py",
     "test:watch": "vitest",
     "make": "npm run build && electron-forge make",
@@ -18,9 +18,11 @@
     "dev:preview": "node scripts/dev.mjs --preview",
     "dev:desktop": "tsc -p tsconfig.main.json && node scripts/launch-desktop.mjs",
     "test:windows": "tsx scripts/windows-proof.ts",
-    "test:windows:insert": "tsx scripts/windows-proof.ts --insert-on-finish"
+    "test:windows:insert": "tsx scripts/windows-proof.ts --insert-on-finish",
+    "build:welcome": "node scripts/build-welcome-template.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "fastify": "^5.12.7",
     "koffi": "^3.3.4",
     "lucide-react": "^0.468.0",
@@ -28,6 +30,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
     "@electron-forge/cli": "^8.0.1",
     "@electron-forge/maker-squirrel": "^8.0.1",
     "@types/node": "^22.0.0",

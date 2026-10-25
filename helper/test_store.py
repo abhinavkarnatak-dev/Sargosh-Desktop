@@ -14,6 +14,29 @@ class StoreTests(unittest.TestCase):
         self.store.db.close()
         self.directory.cleanup()
 
+    def test_accounts_keep_history_and_preferences_separate_and_preserve_legacy_owner(self):
+        first = '11111111-1111-4111-8111-111111111111'
+        second = '22222222-2222-4222-8222-222222222222'
+        self.store.add(self.entry(), '2026-10-25')
+        self.store.preferences({'shortcut': 'Control+Alt+K'})
+        original = self.store.select_account(first)
+        self.assertEqual(len(self.store.snapshot()['history']), 1)
+        self.store.select_account(None)
+        self.assertEqual(self.store.snapshot()['history'], [])
+        other = self.store.select_account(second)
+        self.assertNotEqual(original, other)
+        self.assertEqual(self.store.snapshot()['history'], [])
+        self.assertEqual(self.store.preferences()['shortcut'], 'Control+Alt+Space')
+        self.store.select_account(first)
+        self.assertEqual(len(self.store.snapshot()['history']), 1)
+        self.assertEqual(self.store.preferences()['shortcut'], 'Control+Alt+K')
+        self.assertEqual(self.store.snapshot()['totalWords'], 2)
+
+    def test_account_paths_cannot_escape_local_storage(self):
+        for invalid in ['../other', '', 'a/b', 12, 'C:/Users/other']:
+            with self.assertRaises(ValueError):
+                self.store.select_account(invalid)
+
     def entry(self, status='completed'):
         return {'id': 'recording-a', 'createdAt': '2026-10-25T12:00:00Z', 'text': 'Hello world', 'words': 2, 'durationMs': 2000, 'status': status}
 

@@ -1,3 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { parseEnv } from 'node:util';
+import { DesktopAuth } from './auth';
+import { AuthStorage } from './auth-storage';
+import { publicAuthConfig, hasProfileName } from '../shared/auth';
 import { retrySavedTranscript } from './history-retry';
 import { LocalHistory } from './history';
 import { isHistoryId, type HistoryCapture, type HistoryResult } from '../shared/history';
@@ -5,7 +10,7 @@ import { titleBarAppearance } from './titlebar';
 import { recoveryTextForCopy, validOverlayNotice } from '../shared/overlay-notice';
 import { resizeOverlayBounds } from './overlay-bounds';
 import { deliveryTimeout, validDeliveryRequest, type DeliveryResult } from '../shared/delivery';
-import { app, clipboard, dialog, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
+import { app, clipboard, dialog, safeStorage, shell, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { RecordingCommands } from './recording-commands';
 import { enableOverlayInput } from './overlay-input';
@@ -28,10 +33,13 @@ let tray: Tray | undefined;
 let quitting = false;
 let activeDelivery: string | null = null;
 let history: LocalHistory | undefined;
+let auth: DesktopAuth | undefined;
+let authStorage: AuthStorage | undefined;
+let accountChanging = false;
 let historyRetry: string | null = null;
 const finishedRecordings = new Map<string, { createdAt: string; durationMs: number; bytes: number; mimeType: string }>();
 const helper = new Helper();
-const transcriber = new DesktopTranscriber();
+const transcriber = new DesktopTranscriber(async () => { if (!auth) throw new Error('Sign in to use cloud dictation.'); return auth.accessToken(); });
 const recordingCommands = new RecordingCommands();
 let transcriptionStatus: TranscriptionStatus = { phase: 'idle', message: '' };
 let recordingState: RecordingState = { ...INITIAL_RECORDING_STATE };
@@ -84,7 +92,7 @@ function createWindow(overlay = false): BrowserWindow {
   } else {
     window.webContents.on('render-process-gone', () => stopOwner('The recording window stopped. Reopen Sargosh before recording again.'));
     window.webContents.on('did-start-loading', () => {
-      if (recordingBusy(recordingState) || windowsState.purpose === 'recording') stopOwner('The app reloaded. Any active recording was discarded.');
+      if (recordingBusy(recordingState) || windowsState.enabled && windowsState.purpose === 'recording') stopOwner('The app reloaded. Any active recording was discarded.');
     });
     window.on('close', event => { if (!quitting) { event.preventDefault(); window.hide(); } });
   }
@@ -107,8 +115,45 @@ if (ownsLock) {
     });
     await history.initialize().catch(() => console.error('Local recording history could not be opened.'));
     function ownerHandle(channel: string, work: (value: any) => unknown) {
-      ipcMain.handle(channel, (event, value) => { checkSender(event); if (event.sender !== mainWindow?.webContents || quitting) throw new Error('History is unavailable.'); return work(value); });
+      ipcMain.handle(channel, (event, value) => { checkSender(event); if (event.sender !== mainWindow?.webContents || quitting || accountChanging) throw new Error('History is unavailable.'); if (channel.startsWith('sargosh:history-') || channel === 'sargosh:delete') requireAccount(); return work(value); });
     }
+    let authConfig;
+    try { authConfig = publicAuthConfig({ ...parseEnv(readFileSync(path.join(root, '.env'), 'utf8')), ...process.env }); } catch { authConfig = publicAuthConfig(process.env); }
+    authStorage = new AuthStorage(path.join(app.getPath('userData'), 'auth-session.bin'), safeStorage);
+    auth = new DesktopAuth(authConfig, authStorage, async userId => {
+      accountChanging = true;
+      try {
+        stopOwner('Account changed. Recording stopped.');
+        await history?.drain();
+        const selected = await helper.call<{ directory: string }>('account.select', { userId });
+        history = new LocalHistory(path.join(selected.directory, 'recordings'), helper, () => {
+          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sargosh:history-changed');
+        });
+        await history.initialize(); finishedRecordings.clear();
+        recordingUpdate({ ...INITIAL_RECORDING_STATE });
+        transcriptionStatus = { phase: 'idle', message: '' };
+        for (const window of [mainWindow, overlayWindow]) if (window && !window.isDestroyed()) window.webContents.send('sargosh:transcription-state', transcriptionStatus);
+        // A fresh renderer drops previous audio previews, transcripts and cached history.
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload();
+      } finally { accountChanging = false; }
+    }, state => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sargosh:auth-state', state);
+      if (state.phase === 'signed-in') showMain();
+    }, url => shell.openExternal(url));
+    function requireAccount() {
+      if (accountChanging || auth?.snapshot().phase !== 'signed-in') throw new Error('Sign in to use Sargosh.');
+      if (!hasProfileName(auth.snapshot().user)) throw new Error('Enter your name to finish setting up Sargosh.');
+    }
+    function authAction(channel: string, work: (value: any) => unknown) {
+      ownerHandle(channel, value => { if (recordingBusy(recordingState) || transcriber.busy || activeDelivery || historyRetry) throw new Error('Finish the current dictation first.'); return work(value); });
+    }
+    ownerHandle('sargosh:auth-state', () => auth!.snapshot());
+    authAction('sargosh:auth-send-code', email => auth!.sendCode(email));
+    authAction('sargosh:auth-verify-code', value => auth!.verifyCode(value?.email, value?.code));
+    authAction('sargosh:auth-google', () => auth!.signInGoogle());
+    authAction('sargosh:auth-google-cancel', () => auth!.cancelGoogle());
+    authAction('sargosh:auth-sign-out', () => auth!.signOut());
+    authAction('sargosh:auth-profile', value => auth!.updateProfile(value?.firstName, value?.lastName));
     ownerHandle('sargosh:history-save', async (request: HistoryCapture) => {
       const metadata = request && finishedRecordings.get(request.id);
       if (!metadata || !request.audio || request.audio.byteLength !== metadata.bytes || request.mimeType !== metadata.mimeType) throw new Error('Invalid finished recording.');
@@ -180,6 +225,7 @@ if (ownsLock) {
 
     ipcMain.handle('sargosh:recording-report', (event, value: RecordingState) => {
       checkSender(event);
+      if (accountChanging) return;
       if (event.sender !== mainWindow?.webContents) throw new Error('Only the recording owner can publish audio state.');
       if (!value || !['idle', 'opening', 'recording', 'finishing', 'ready', 'cancelled', 'failed'].includes(value.phase) ||
           !Number.isFinite(value.level) || value.level < 0 || value.level > 100 ||
@@ -230,6 +276,7 @@ if (ownsLock) {
       if (activeDelivery === sessionId) await helper.call('windows.cancel-delivery', { sessionId });
     });
     handle('sargosh:recording-start', (shortcut: unknown) => {
+      requireAccount();
       if (historyRetry || activeDelivery || recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Finish recording before changing shortcuts.');
       const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
       return helper.call('windows.arm', { shortcut, ignoredProcessIds, purpose: 'recording' });
@@ -242,6 +289,7 @@ if (ownsLock) {
       return helper.call('windows.arm', { shortcut, ignoredProcessIds });
     });
     handle('sargosh:windows-action', (action: unknown) => {
+      if (action === 'start-hands-free') requireAccount();
       if (action === 'start-hands-free' && historyRetry) throw new Error('Wait for the transcript retry to finish.');
       if (!dev || !['cancel', 'finish', 'start-hands-free', 'disarm'].includes(String(action))) throw new Error('Invalid Windows test action.');
       return helper.call('windows.' + action);
@@ -250,7 +298,7 @@ if (ownsLock) {
       if (!dev || typeof sessionId !== 'string' || sessionId.length > 80) throw new Error('Invalid Windows test session.');
       return helper.call('windows.insert-test', { sessionId });
     });
-    handle('sargosh:snapshot', () => helper.call('snapshot'));
+    handle('sargosh:snapshot', () => { requireAccount(); return helper.call('snapshot'); });
     handle('sargosh:preferences', (update: Partial<Preferences>) => helper.call('preferences', update));
     ownerHandle('sargosh:delete', (id: string) => {
       if (historyRetry === id) throw new Error('Wait for this transcript retry to finish.');
@@ -288,6 +336,7 @@ if (ownsLock) {
         return { desktop: true, helper: helper.ready, api: response.ok, auth: data.auth === true, stt: data.stt === true, cleanup: data.cleanup === true };
       } catch { return { desktop: true, helper: helper.ready, api: false, auth: false, stt: false, cleanup: false }; }
     });
+    await auth.initialize();
     mainWindow = createWindow(); overlayWindow = createWindow(true);
     tray = new Tray(nativeImage.createFromPath(path.join(root, 'assets', 'app-icon.png')).resize({ width: 20, height: 20 }));
     tray.setToolTip('Sargosh');
@@ -300,5 +349,5 @@ app.on('before-quit', event => {
   if (quitting) { tray?.destroy(); return; }
   event.preventDefault(); quitting = true;
   recordingCommands.cancelAll(); transcriber.cancelAll();
-  void Promise.resolve(history?.drain()).catch(() => {}).then(() => helper.stop()).finally(() => app.quit());
+  void Promise.all([history?.drain(), auth?.dispose(), authStorage?.drain()]).catch(() => {}).then(() => helper.stop()).finally(() => app.quit());
 });

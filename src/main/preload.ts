@@ -3,7 +3,22 @@ import type { TranscriptionStatus } from '../shared/transcription';
 import type { RecordingState } from '../shared/recording';
 import type { WindowsState } from '../shared/windows';
 import type { DesktopBridge } from '../shared/types';
+async function authCall(channel: string, value?: unknown) {
+  try { return value === undefined ? await ipcRenderer.invoke(channel) : await ipcRenderer.invoke(channel, value); }
+  catch (error) {
+    const text = error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : '';
+    throw new Error(text && text.length <= 400 ? text : 'Sign-in could not complete. Please try again.');
+  }
+}
 const bridge: DesktopBridge = {
+  authState: () => authCall('sargosh:auth-state'),
+  onAuthState: listener => { const handler = (_event: Electron.IpcRendererEvent, state: import('../shared/auth').AuthState) => listener(state); ipcRenderer.on('sargosh:auth-state', handler); return () => { ipcRenderer.removeListener('sargosh:auth-state', handler); }; },
+  sendEmailCode: email => authCall('sargosh:auth-send-code', email),
+  verifyEmailCode: (email, code) => authCall('sargosh:auth-verify-code', { email, code }),
+  signInGoogle: () => authCall('sargosh:auth-google'),
+  cancelGoogleSignIn: () => authCall('sargosh:auth-google-cancel'),
+  signOut: () => authCall('sargosh:auth-sign-out'),
+  updateProfile: (firstName, lastName) => authCall('sargosh:auth-profile', { firstName, lastName }),
   saveHistory: request => ipcRenderer.invoke('sargosh:history-save', request),
   updateHistory: request => ipcRenderer.invoke('sargosh:history-update', request),
   listHistory: cursor => ipcRenderer.invoke('sargosh:history-list', cursor),
