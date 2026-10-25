@@ -1,0 +1,40 @@
+{
+  "name": "sargosh-desktop",
+  "productName": "Sargosh",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Windows dictation companion with local history.",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:ui": "vite --host 127.0.0.1",
+    "dev:api": "tsx watch src/server/index.ts",
+    "build": "tsc -p tsconfig.main.json && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json",
+    "test": "vitest run && python -m unittest discover -s helper -p test_*.py",
+    "test:watch": "vitest",
+    "make": "npm run build && electron-forge make",
+    "package": "npm run build && electron-forge package",
+    "dev:preview": "node scripts/dev.mjs --preview",
+    "dev:desktop": "tsc -p tsconfig.main.json && node scripts/launch-desktop.mjs"
+  },
+  "dependencies": {
+    "fastify": "^5.12.7",
+    "lucide-react": "^0.468.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^8.0.1",
+    "@electron-forge/maker-squirrel": "^8.0.1",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^45.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
