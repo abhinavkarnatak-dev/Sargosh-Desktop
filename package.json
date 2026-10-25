@@ -22,7 +22,8 @@
     "build:welcome": "node scripts/build-welcome-template.mjs",
     "build:api": "tsc -p tsconfig.server.json",
     "start:api": "node dist-api/server/index.js",
-    "build:desktop-config": "node scripts/build-desktop-config.mjs"
+    "build:desktop-config": "node scripts/build-desktop-config.mjs",
+    "test:api-build": "node scripts/check-api-build.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

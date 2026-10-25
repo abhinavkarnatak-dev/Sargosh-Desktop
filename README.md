@@ -238,6 +238,8 @@ Run [`supabase/migrations/202610260002_usage_limits.sql`](supabase/migrations/20
 
 Render Free can sleep after 15 minutes without inbound traffic, and waking can take about a minute. The desktop first requests the health endpoint before sending a paid operation and permits a longer deadline for startup; it never automatically retries a paid POST. Render restarts clear only the short-lived response cache, not the Supabase ledger. Free hosting remains subject to Render's compute, bandwidth, build, and outbound-traffic limitations. See [Render Free](https://render.com/docs/free), [Docker deployment](https://render.com/docs/docker), [Deepgram pricing](https://deepgram.com/pricing), and [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
+Run `npm run test:api-build` to validate a clean API-only install, TypeScript build, and pruned production runtime in an isolated folder. The API manifest and lockfile must not contain local links to the desktop repository. The Docker builder explicitly installs development dependencies needed by TypeScript, then removes them from the runtime.
+
 For development, `npm run build:api` builds the server without Electron, and `npm run start:api` starts it. `ffmpeg-static` is a development-only test dependency for real audio validation tests on Windows; hosted images install system FFmpeg instead. Usage/database tests run PostgreSQL in PGlite and provider tests use fake responses. Live hosted authentication, quota persistence across a Render restart, and a real short dictation must also be verified after deployment.
 
 ## Welcome email setup
