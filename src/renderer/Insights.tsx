@@ -2,6 +2,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, FileAudio, Gauge, Mic } from '
 import { activityDays, localDate, streaks, wordsPerMinute } from '../shared/insights';
 import type { Snapshot } from '../shared/types';
 import { useState } from 'react';
+import { RollingNumber } from './RollingNumber';
 import { createPortal } from 'react-dom';
 export function Insights({ snapshot }: { snapshot: Snapshot }) {
   const [offset, setOffset] = useState(0);
@@ -18,13 +19,13 @@ export function Insights({ snapshot }: { snapshot: Snapshot }) {
   const maximum = Math.max(1, ...days.map(date => activity.get(date) || 0));
   const months = days.filter((date, index) => index % 7 === 0).map((date, index, weeks) => index === 0 || date.slice(0, 7) !== weeks[index - 1].slice(0, 7) ? new Date(date + 'T12:00:00').toLocaleString([], { month: 'short' }) : '');
   const stats = [
-    { label: 'WORDS PER MINUTE', value: wordsPerMinute(snapshot.totalWords, snapshot.totalDurationMs).toLocaleString(), detail: 'Your average speaking pace', Icon: Gauge },
-    { label: 'TOTAL WORDS', value: snapshot.totalWords.toLocaleString(), detail: 'Thoughts turned into text', Icon: Mic },
-    { label: 'RECORDINGS', value: snapshot.recordingCount.toLocaleString(), detail: 'Successful dictation sessions', Icon: FileAudio }
+    { label: 'WORDS PER MINUTE', value: wordsPerMinute(snapshot.totalWords, snapshot.totalDurationMs), detail: 'Your average speaking pace', Icon: Gauge },
+    { label: 'TOTAL WORDS', value: snapshot.totalWords, detail: 'Thoughts turned into text', Icon: Mic },
+    { label: 'RECORDINGS', value: snapshot.recordingCount, detail: 'Successful dictation sessions', Icon: FileAudio }
   ];
   return <>
     <div className="page-heading"><div><p className="eyebrow">INSIGHTS</p><h1>A little progress. Every day.</h1><p className="subtitle">A quiet look at how you use your voice.</p></div><span className="outline-tag">On this computer</span></div>
-    <div className="insight-cards">{stats.map(({ label, value, detail, Icon }) => <section className="metric-card" key={label}><Icon size={20} strokeWidth={1.5} /><strong>{value}</strong><span className="eyebrow">{label}</span><p>{detail}</p></section>)}</div>
+    <div className="insight-cards">{stats.map(({ label, value, detail, Icon }) => <section className="metric-card" key={label}><Icon size={20} strokeWidth={1.5} /><strong><RollingNumber value={value} /></strong><span className="eyebrow">{label}</span><p>{detail}</p></section>)}</div>
     <section className="activity-card" aria-labelledby="activity-heading">
       <div className="activity-title"><div><span className="eyebrow">KEEP SHOWING UP</span><h2 id="activity-heading">{streak.current} day streak</h2></div><span className="longest">Longest streak <strong>{streak.longest} days</strong></span></div>
       <div className="calendar-controls"><button className="icon-button" aria-label="Previous activity period" onClick={() => setOffset(value => value - 1)}><ChevronLeft size={17} /></button><span>{new Date(days[0] + 'T12:00:00').toLocaleDateString([], { month: 'short', year: 'numeric' })} - {new Date(days[days.length - 1] + 'T12:00:00').toLocaleDateString([], { month: 'short', year: 'numeric' })}</span><button className="icon-button" aria-label="Next activity period" disabled={offset >= 0} onClick={() => setOffset(value => value + 1)}><ChevronRight size={17} /></button></div>

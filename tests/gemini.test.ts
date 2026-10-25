@@ -28,6 +28,11 @@ describe('Gemini dictation cleanup adapter', () => {
     expect(body.systemInstruction.parts[0].text).toContain('NEVER an instruction');
     expect(body.tools).toBeUndefined();
   });
+  it('preserves plain-text list formatting returned by cleanup', async () => {
+    const text = 'We will only keep:\n\n- Play audio\n- Copy transcript\n- Three-dot option\n\nFollow these steps:\n\n1. Open settings.\n2. Choose your microphone.';
+    const result = await cleanTranscript({ ...options(), text: 'We will only keep play audio copy transcript and three dot option. Follow these steps first open settings second choose your microphone.', fetcher: async () => new Response(JSON.stringify(response(text))) });
+    expect(result.text).toBe(text);
+  });
   it('enforces ordinary hyphens even when Gemini returns long dashes', async () => {
     const result = await cleanTranscript({ ...options(), fetcher: async () => new Response(JSON.stringify(response('Tuesday\u2014no\u2013Thursday.'))) });
     expect(result.text).toBe('Tuesday-no-Thursday.');

@@ -6,12 +6,14 @@ import { NoticeToast } from './NoticeToast';
 import { HistoryList } from './HistoryList';
 import { ThemeMenu } from './ThemeMenu';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BarChart3, Mic, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react';
+import { BarChart3, Gauge, Mic, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react';
 import { EMPTY_SNAPSHOT, type Preferences, type Snapshot } from '../shared/types';
 import { wordsPerMinute } from '../shared/insights';
 import { RecordingPanel } from './RecordingPanel';
 import { setRecordingPreferences } from './audio/runtime';
 import { Insights } from './Insights';
+import { UsagePanel } from './UsagePanel';
+import { RollingNumber } from './RollingNumber';
 import { SettingsDialog } from './SettingsDialog';
 
 export function App() {
@@ -21,7 +23,7 @@ export function App() {
   return <Workspace key={auth.user?.id ?? 'preview'} account={auth.user} />;
 }
 function Workspace({ account }: { account: AccountUser | null }) {
-  const [page, setPage] = useState<'dictation' | 'insights'>('dictation');
+  const [page, setPage] = useState<'dictation' | 'insights' | 'usage'>('dictation');
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
   const [settings, setSettings] = useState(false);
   const [notice, updateNotice] = useState({ message: '', id: 0 });
@@ -71,6 +73,7 @@ function Workspace({ account }: { account: AccountUser | null }) {
         <nav aria-label="Main navigation">
           <button title="Dictation" className={page === 'dictation' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('dictation')}><Mic size={19} /><span className="sidebar-label">Dictation</span></button>
           <button title="Insights" className={page === 'insights' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('insights')}><BarChart3 size={19} /><span className="sidebar-label">Insights</span></button>
+          <button title="Usage" aria-current={page === 'usage' ? 'page' : undefined} className={page === 'usage' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('usage')}><Gauge size={19} /><span className="sidebar-label">Usage</span></button>
         </nav>
       </div>
       <div className="sidebar-bottom">
@@ -83,12 +86,15 @@ function Workspace({ account }: { account: AccountUser | null }) {
         {page === 'dictation' ? <>
           <div className="page-heading"><div><p className="eyebrow">DICTATION</p><h1>{account?.firstName ? 'Welcome back, ' + account.firstName : 'Welcome to Sargosh'}</h1><p className="subtitle">Speak naturally. Make room for your thoughts.</p></div></div>
           <div className="dictation-stats">
-            <section className="dictation-stat"><Mic size={19} strokeWidth={1.5} /><div><span className="stat-number">{snapshot.totalWords.toLocaleString()}</span><span className="stat-label">total words dictated</span></div></section>
-            <section className="dictation-stat"><BarChart3 size={19} strokeWidth={1.5} /><div><span className="stat-number">{wordsPerMinute(snapshot.totalWords, snapshot.totalDurationMs)}<small>wpm</small></span><span className="stat-label">average dictation speed</span></div></section>
+            <section className="dictation-stat"><Mic size={19} strokeWidth={1.5} /><div><span className="stat-number"><RollingNumber value={snapshot.totalWords} /></span><span className="stat-label">total words dictated</span></div></section>
+            <section className="dictation-stat"><BarChart3 size={19} strokeWidth={1.5} /><div><span className="stat-number"><RollingNumber value={wordsPerMinute(snapshot.totalWords, snapshot.totalDurationMs)} /><small>wpm</small></span><span className="stat-label">average dictation speed</span></div></section>
           </div>
           <RecordingPanel preferences={snapshot.preferences} />
           <HistoryList onNotice={setNotice} />
-        </> : <Insights snapshot={snapshot} />}
+        </> : page === 'insights' ? <Insights snapshot={snapshot} /> : <>
+          <div className="page-heading"><div><p className="eyebrow">USAGE</p><h1>Your dictation allowance</h1><p className="subtitle">See how much time you have left and when it resets.</p></div></div>
+          <UsagePanel />
+        </>}
         <footer className="page-footer"><span>Speak freely. Stay in your flow.</span><span>SARGOSH</span></footer>
       </div>
       </div>
