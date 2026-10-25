@@ -4,6 +4,7 @@ import type { RecordingState } from '../shared/recording';
 import type { WindowsState } from '../shared/windows';
 import type { DesktopBridge } from '../shared/types';
 const bridge: DesktopBridge = {
+  cleanupTranscript: request => ipcRenderer.invoke('sargosh:cleanup', request),
   transcribeAudio: request => ipcRenderer.invoke('sargosh:transcribe', request),
   cancelTranscription: requestId => ipcRenderer.invoke('sargosh:transcription-cancel', requestId),
   reportTranscription: status => ipcRenderer.invoke('sargosh:transcription-report', status),
@@ -23,7 +24,15 @@ const bridge: DesktopBridge = {
     return () => { ipcRenderer.removeListener('sargosh:recording-state', handler); };
   },
   onRecordingCommand: listener => {
-    const handler = (_event: Electron.IpcRendererEvent, action: 'cancel' | 'finish') => listener(action);
+    const handler = async (_event: Electron.IpcRendererEvent, command: 'cancel' | 'finish' | { id: string; action: 'cancel' | 'finish' }) => {
+      // Plain commands are coordinator shutdown/cancellation notifications.
+      const action = typeof command === 'string' ? command : command.action;
+      let ok = false;
+      try { await listener(action); ok = true; } catch { /* Report failure to the requesting overlay. */ }
+      finally {
+        if (typeof command !== 'string') void ipcRenderer.invoke('sargosh:recording-command-result', { id: command.id, ok }).catch(() => {});
+      }
+    };
     ipcRenderer.on('sargosh:recording-command', handler);
     return () => { ipcRenderer.removeListener('sargosh:recording-command', handler); };
   },

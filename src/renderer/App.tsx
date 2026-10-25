@@ -83,7 +83,7 @@ export function App() {
               <div className="menu-wrap"><button className="icon-button" aria-label="Recording options" aria-expanded={menu === entry.id} onClick={() => setMenu(menu === entry.id ? null : entry.id)}><MoreHorizontal size={18} /></button>{menu === entry.id && <div className="context-menu"><button disabled title="Cloud transcription is not connected">Retry transcription</button><button className="danger-text" onClick={() => { setMenu(null); setDeleting(entry.id); }}><Trash2 size={14} />Delete</button></div>}</div>
               </div></article>)}</div>}
           </section>
-          <div className="build-note"><span className="outline-tag">Development build</span><p>Record audio and transcribe it with Deepgram. Sign-in, Gemini cleanup, and automatic text insertion are not connected yet.</p></div>
+          <div className="build-note"><span className="outline-tag">Development build</span><p>Record audio, transcribe with Deepgram, and clean the text with Gemini. Sign-in and automatic text insertion are not connected yet.</p></div>
         </> : <Insights snapshot={snapshot} />}
         <footer className="page-footer"><span>Speak freely. Stay in your flow.</span><span>SARGOSH</span></footer>
       </div>

@@ -9,7 +9,7 @@ export interface AudioBackend {
   open(deviceId: string, onLevel: (level: number) => void, onFailure: (message: string) => void, signal: AbortSignal): Promise<AudioCapture>;
 }
 interface Active {
-  id: string; abort: AbortController; lastSoundAt?: number; limitReached?: boolean; capture?: AudioCapture; accepted: boolean; ending: boolean; openedAt?: number;
+  id: string; abort: AbortController; lastSoundAt?: number; limitReached?: boolean; capture?: AudioCapture; accepted: boolean; ending: boolean; targetFrozen?: boolean; openedAt?: number;
   timer?: ReturnType<typeof setInterval>; openingTimer?: ReturnType<typeof setTimeout>;
 }
 export class RecordingController {
@@ -61,7 +61,7 @@ export class RecordingController {
     active.accepted = true;
     this.update({ mode, ...(active.capture ? { phase: 'recording', message: 'Listening. Recording on this computer.' } : {}) });
   }
-  async finish(id = this.state.sessionId): Promise<void> {
+  async finish(id = this.state.sessionId, beforeReady?: () => Promise<void>): Promise<void> {
     const active = this.active;
     if (!active || active.id !== id || active.ending) return;
     if (!active.capture || active.openedAt === undefined) {
@@ -73,7 +73,7 @@ export class RecordingController {
     this.update({ phase: 'finishing', level: 0, durationMs: Math.min(MAX_RECORDING_MS, Math.round(this.now() - active.openedAt)), quiet: false, message: 'Collecting the last audio...' });
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const blob = await Promise.race([active.capture.finish(), new Promise<never>((_, reject) => {
+      const [blob] = await Promise.race([Promise.all([active.capture.finish(), beforeReady?.()]), new Promise<never>((_, reject) => {
         timeout = setTimeout(() => reject(new Error('Final audio timed out')), 5000);
       })]);
       if (this.active !== active) return;
@@ -119,8 +119,8 @@ export class RecordingController {
     }
     if (this.active?.id !== id) return true;
     if (state.phase === 'listening') this.accept(id, state.mode);
-    if (state.phase === 'finished' && !this.active.ending) {
-      this.update({ target: state.target });
+    if (state.phase === 'finished') {
+      if (!this.active.targetFrozen) { this.active.targetFrozen = true; this.update({ target: state.target }); }
       void this.finish(id);
     }
     if (state.phase === 'cancelled' || state.phase === 'failed') this.cancel(id);

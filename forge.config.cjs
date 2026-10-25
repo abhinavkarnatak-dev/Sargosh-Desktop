@@ -1,6 +1,6 @@
 module.exports = {
   packagerConfig: {
-    asar: true, executableName: 'Sargosh', icon: 'assets/sargosh',
+    asar: { unpack: '**/*.node' }, executableName: 'Sargosh', icon: 'assets/sargosh',
     ignore: [/^\/work($|\/)/, /^\/\.local($|\/)/, /^\/\.env/, /^\/tests($|\/)/, /^\/src($|\/)/, /^\/helper($|\/)/, /^\/\.git($|\/)/],
     extraResource: ['assets']
   },

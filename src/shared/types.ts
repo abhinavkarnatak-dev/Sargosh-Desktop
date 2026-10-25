@@ -1,3 +1,4 @@
+import type { CleanupRequest, CleanupResult } from './cleanup';
 import type { TranscriptionRequest, Transcript, TranscriptionStatus } from './transcription';
 import type { RecordingState } from './recording';
 import type { WindowsState } from './windows';
@@ -8,6 +9,7 @@ export interface DayActivity { date: string; words: number }
 export interface Snapshot { preferences: Preferences; history: HistoryEntry[]; activity: DayActivity[]; totalWords: number; recordingCount: number; totalDurationMs: number }
 export interface RuntimeStatus { desktop: boolean; helper: boolean; api: boolean; auth: boolean; stt: boolean; cleanup: boolean }
 export interface DesktopBridge {
+  cleanupTranscript(request: CleanupRequest): Promise<{ ok: true; result: CleanupResult } | { ok: false; code: string; message: string }>;
   transcribeAudio(request: TranscriptionRequest): Promise<{ ok: true; result: Transcript } | { ok: false; code: string; message: string }>;
   cancelTranscription(requestId: string): Promise<void>;
   reportTranscription(status: TranscriptionStatus): Promise<void>;
@@ -18,7 +20,7 @@ export interface DesktopBridge {
   recordingStatus(): Promise<RecordingState>;
   recordingAction(action: 'cancel' | 'finish'): Promise<void>;
   onRecordingState(listener: (state: RecordingState) => void): () => void;
-  onRecordingCommand(listener: (action: 'cancel' | 'finish') => void): () => void;
+  onRecordingCommand(listener: (action: 'cancel' | 'finish') => void | Promise<void>): () => void;
   windowsStatus(): Promise<WindowsState>;
   startWindowsTest(shortcut: string): Promise<WindowsState>;
   windowsAction(action: 'cancel' | 'finish' | 'start-hands-free' | 'disarm'): Promise<WindowsState>;

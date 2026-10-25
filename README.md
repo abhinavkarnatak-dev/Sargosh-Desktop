@@ -2,15 +2,15 @@
 
 Sargosh is a Windows dictation companion designed to turn natural speech into text in the apps you use. Its interface brings together a floating dictation control, a local recording history, and simple usage insights.
 
-The source currently provides a runnable desktop workspace, an idle overlay, light and dark themes, local preferences and statistics storage, an on-device microphone level test, and local audio recording with playback, and Deepgram transcription through a local backend. An opt-in Windows input test checks hold-to-talk, double-tap hands-free, editable-field tracking, and clipboard-free delivery of a fixed sentence. The fixed-text Windows input test does not record audio. Account sign-in, Gemini cleanup, persistent dictation history, and automatic transcript insertion are not available in this build.
+The source provides a Windows desktop workspace with light and dark themes, a floating recording control, local audio playback, Deepgram transcription, and optional Gemini Flash-Lite cleanup. An opt-in Windows input test checks clipboard-free delivery of a fixed sentence. Account sign-in, persistent completed-dictation history, and automatic transcript insertion are not available in this build.
 
 ## Using the desktop workspace
 
 - **Dictation** is the home for transcripts and original recordings once dictation is connected.
 - **Insights** shows total words, recording count, average words per minute, and daily activity. A day's tooltip contains only its date and word count.
-- **Settings** contains theme and microphone preferences and a microphone test.
+- **Settings** contains theme and microphone preferences and a microphone test. While Settings is open, the background stays still and cannot be interacted with. Click outside the dialog, press Escape, or use its close button to return.
 - The tray icon reopens Sargosh. Closing the main window hides it; choose **Quit Sargosh** from the tray menu to exit.
-- The floating pill expands on hover. Its microphone button opens the main app until recording shortcuts are enabled; it then starts hands-free recording. The grip moves the control. During transcription, the control shows progress and allows cancellation.
+- The floating pill expands on hover. Its microphone button opens the main app until recording shortcuts are enabled; it then starts hands-free recording. The grip moves the control. After you finish speaking, the control keeps the audio dots and shows a small loader on their right while your text is prepared. It does not display processing-stage names or cancel buttons during this step.
 - The microphone level test processes sound levels on your computer. It does not save or upload audio.
 - **Check your recording** captures a temporary local clip with start, finish, cancel, playback, and discard controls.
 
@@ -40,26 +40,28 @@ $env:SARGOSH_PYTHON = 'C:\Path\To\python.exe'
 npm run dev
 ```
 
-Interface edits refresh automatically. Restart the development command after editing the desktop coordinator or Python helper. Stop it with Ctrl+C in its terminal. The development ports must be free before starting.
+Interface edits refresh automatically. After editing the desktop coordinator, preload bridge, or Python helper, choose **Quit Sargosh** from the tray and run `npm run dev:desktop` again if the preview services are already running. Closing the main window only hides it and does not load desktop changes. Stop it with Ctrl+C in its terminal. The development ports must be free before starting.
 
-## Deepgram credential setup
+## Cloud credential setup
 
-Copy `.env.example` to a private `.env` file at the project root. Add your Deepgram key after the equals sign, keep the local development switch enabled, and save:
+Copy `.env.example` to a private `.env` file at the project root. Add your Deepgram key and, for cleanup, your Gemini key. Keep the local development switch enabled and save. Edit an existing `.env` in place rather than replacing its credentials:
 
 ```dotenv
 DEEPGRAM_API_KEY=
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.5-flash-lite
 SARGOSH_LOCAL_TRANSCRIPTION=1
 ```
 
-Git ignores `.env`. Do not put this key in a `VITE_` variable, the desktop interface, or the distributed app. The Fastify backend loads `.env` when it starts. Restart the API after editing credentials. Only the backend sends the key to Deepgram; the browser and Electron renderer receive a separate temporary local session token. No Deepgram SDK or additional package is required.
+Git ignores `.env`. Do not put either key in a `VITE_` variable, the desktop interface, or the distributed app. The Fastify backend loads `.env` when it starts. Restart the API after editing credentials. Only the backend sends provider keys to their respective services; the browser and Electron renderer receive a separate temporary local session token. Node.js built-in HTTP tools handle both providers, so no Deepgram or Gemini SDK is required. Create keys in [Deepgram Console](https://console.deepgram.com/) and [Google AI Studio](https://aistudio.google.com/apikey).
 
 ## How it works
 
-React and TypeScript render the main workspace and a separate Electron overlay window. Electron manages the tray and desktop lifecycle. A restricted preload bridge exposes specific app actions rather than general operating-system access.
+React and TypeScript render the main workspace and a separate Electron overlay window. Electron manages the tray and desktop lifecycle. Koffi connects a small TypeScript overlay adapter to Windows so the floating controls accept mouse clicks while your input keeps keyboard focus. A restricted preload bridge exposes specific app actions rather than general operating-system access.
 
 The desktop coordinator launches a Python helper and exchanges structured messages over its input/output pipes. `comtypes` connects the helper to Windows UI Automation. Python's built-in Windows-library access handles shortcut events and Unicode keyboard delivery. The helper does not read document text or clipboard contents. Python's built-in SQLite module stores preferences, history records, and accumulated metrics. Development data is kept in `.local/` inside the project and is excluded from Git.
 
-The local Fastify service supplies health and connection-status endpoints and forwards audio to Deepgram. Its development transcription bridge binds to `127.0.0.1`, checks Host and Origin, requires a temporary local token, limits upload size, allows one transcription at a time, and limits attempts to 10 per minute. Local mode requires an explicit environment switch and is disabled when `NODE_ENV=production`. It is not a public authenticated backend. No sample transcripts or fabricated activity are included.
+The local Fastify service supplies health and connection-status endpoints, forwards audio to Deepgram, and sends transcript text to Gemini when cleanup is enabled. Its development transcription bridge binds to `127.0.0.1`, checks Host and Origin, requires a temporary local token, limits upload size, allows one cloud operation at a time, and limits each provider stage to 10 attempts per minute. Local mode requires an explicit environment switch and is disabled when `NODE_ENV=production`. It is not a public authenticated backend. No sample transcripts or fabricated activity are included.
 
 The agreed dictation design is record-then-upload, with Deepgram recognition and Gemini Flash-Lite cleanup. Recordings and transcript history belong on the computer; account and usage data belong in managed PostgreSQL with Supabase Auth. Cloud processing will transmit audio and text to the respective providers when enabled.
 
@@ -73,9 +75,9 @@ Microphone access starts when you begin a recording, including the brief shortcu
 
 Each session is limited to 5 minutes and 25 MiB. No microphone activity for several seconds produces a level warning, not a speech-recognition result. Permission failures, a disconnected microphone, empty output, and audio finalization timeouts are reported without uploading or retrying the audio. Changing the selected microphone applies to the next recording.
 
-Only the latest finished clip is kept in memory. A new recording replaces it; **Discard audio**, a page reload, or app exit removes it. These clips are not written to SQLite or counted in Insights. They are sent to Deepgram only when you request transcription or enable automatic transcription; Gemini is not connected. The saved input target is retained for future transcription delivery, but recording mode does not insert the fixed test sentence.
+Only the latest finished clip is kept in memory. A new recording replaces it; **Discard audio**, a page reload, or app exit removes it. These clips are not written to SQLite or counted in Insights. They are sent to Deepgram only when you request transcription or enable automatic transcription; enabled cleanup sends the recognized transcript text to Gemini, not the audio. The saved input target is retained for future transcription delivery, but recording mode does not insert the fixed test sentence.
 
-The main renderer owns one microphone and recorder. The overlay receives state and sends commands through Electron; it never opens a second recorder. The main renderer's background timer throttling is disabled so hiding it does not suspend recording controls. Reloading the owner, losing Windows input access, or putting the computer to sleep cancels active recording and disarms shortcuts.
+The main renderer owns one microphone and recorder. The overlay receives state and sends commands through Electron; it never opens a second recorder. On Windows, a small native mouse-activation hook lets its buttons receive clicks without taking keyboard focus from your input. The overlay Cancel button stops an active recording. Processing can still be cancelled from the main recording panel. Finish stops microphone capture immediately and waits for both the final audio and the saved destination before making the clip available. If a control cannot reach the recording window, the overlay shows a restart message. The main renderer's background timer throttling is disabled so hiding it does not suspend recording controls. Reloading the owner, losing Windows input access, or putting the computer to sleep cancels active recording and disarms shortcuts.
 
 ## Transcribe with Deepgram
 
@@ -85,11 +87,27 @@ Choose English, Hindi, or multilingual recognition on Dictation or in Settings >
 
 The flow is recording > final audio chunk > local Fastify API > Deepgram > transcript display. Browser preview uses Vite's same-origin `/api` proxy. Electron forwards audio through its restricted main-process bridge to the local API, so packaged file pages do not need direct browser access to the API. Container audio is uploaded as binary data; the server does not incorrectly label WebM/Opus as raw PCM.
 
-Wait for transcription to finish or cancel it before starting another recording. Cancellation aborts the local request and ignores any late response; it cannot undo processing or charges already incurred at the provider. Failures leave the clip available for an explicit retry. The app does not automatically retry paid calls. **Transcribe again** starts a new request and may consume credits. Empty results are shown as no speech recognized rather than fabricated text. The provider request times out after 60 seconds; the local client also has a deadline.
+Wait for transcription and any enabled cleanup to finish, or cancel the current stage, before starting another recording. Cancellation aborts the local request and ignores any late response; it cannot undo processing or charges already incurred at the provider. Failures leave the clip available for an explicit retry. The app does not automatically retry paid calls. **Transcribe again** starts a new request and may consume credits. Empty results are shown as no speech recognized rather than fabricated text. The provider request times out after 60 seconds; the local client also has a deadline.
 
 Audio and transcript previews stay in memory until replaced, discarded, reloaded, or closed. For exact duplicate request IDs, the local API keeps at most 32 successful response entries for 5 minutes to prevent duplicate provider calls. It does not write audio or transcripts to disk or request logs. Deepgram receives the audio and processes it under its own data policies; requests set `mip_opt_out=true` to opt out of the Model Improvement Program. See [Deepgram's data policy](https://developers.deepgram.com/trust-security/your-data).
 
-The returned transcript is displayed as text. Gemini cleanup, automatic insertion into the remembered Windows input, and saving completed dictations to history are separate integrations. This local development bridge must be replaced by authenticated account access and usage allowances before public deployment. Never ship private provider credentials inside the installer.
+The transcript is displayed as text and can optionally be cleaned with Gemini. Automatic insertion into the remembered Windows input and saving completed dictations to history are separate integrations. This local development bridge must be replaced by authenticated account access and usage allowances before public deployment. Never ship private provider credentials inside the installer.
+
+## Clean up with Gemini
+
+With **Clean up with Gemini after transcription** selected, completed Deepgram text is sent to the backend cleanup route and then to Gemini. The checkbox is on initially. Turn it off to keep transcription as a Deepgram-only operation. **Transcribe automatically after recording** remains a separate setting, initially off. These settings last for the page session.
+
+Cleanup removes clear fillers and false starts, applies explicit spoken corrections, and improves punctuation. It is instructed to preserve meaning, names, technical identifiers, amounts, negations, language, and script. Dictated questions and instructions remain dictation; the model has no tools or operating-system access. Both the instructions and deterministic output processing require ordinary hyphens instead of en or em dashes.
+
+The default is `gemini-3.5-flash-lite`. `GEMINI_MODEL` can select `gemini-2.5-flash-lite`, `gemini-3.1-flash-lite`, or `gemini-3.5-flash-lite`; unsupported values use the default. Availability depends on the Google project. The app does not retry with another model when a request fails. Model choice is backend configuration, never a request-supplied URL or model name.
+
+The cleaned text appears above an expandable **Original Deepgram transcript**. You can copy either version, cancel cleanup, or choose **Retry cleanup** after a failure. A cleanup retry uses the retained transcript and does not upload the audio to Deepgram again. **Clean up again** explicitly makes another Gemini request and may consume quota or credits. Empty recognition results do not call Gemini.
+
+If Gemini is unavailable, blocked, rate-limited, times out, or returns incomplete or invalid JSON, the original transcript stays available. Cleanup edits can still be mistaken; compare with the original when accuracy matters. Input is limited to 24,000 characters, provider requests time out after 20 seconds, and the local client has a separate deadline. Output is schema-validated and length-bounded. No partially generated result is used.
+
+The local API checks its session token, bounds request size and concurrency, and keeps at most 32 successful cleanup responses in memory for 5 minutes to avoid duplicate calls for identical request IDs. Transcript text and cleaned text are not saved to disk or request logs. Google receives the transcript and language hint; its data-use rules depend on the project and billing tier. Review [Gemini API terms](https://ai.google.dev/gemini-api/terms) and [Gemini pricing and data-use information](https://ai.google.dev/gemini-api/docs/pricing).
+
+Cleanup does not type into other apps or save completed dictations to history. Local previews are removed when replaced, discarded, reloaded, or closed, while the bounded backend deduplication caches expire independently.
 
 ## Check Windows input behavior
 
@@ -121,7 +139,7 @@ The microphone level test does not retain audio. Recording previews remain in me
 
 Successful recording metrics are stored independently of history entries so deleting history does not erase accumulated statistics. Retrying an existing recording does not count it twice. Dictation speed is total finalized words divided by total recording time in minutes, including pauses.
 
-Secrets, local databases, development recordings, and private assistant configuration must not be committed. A distributed desktop app must never contain private Deepgram, Gemini, or database service keys. Deepgram credential setup is documented above. Additional provider credentials are configured with their respective integrations.
+Secrets, local databases, development recordings, and private assistant configuration must not be committed. A distributed desktop app must never contain private Deepgram, Gemini, or database service keys. Provider credential setup is documented above. Neither private `.env` files nor actual keys belong in Git or an installer.
 
 ## Checks and builds
 
@@ -131,6 +149,6 @@ npm test
 npm run build
 ```
 
-The tests cover lifecycle cancellation, late results, destination freezing, duplicate completion, insights calculations, local SQLite persistence, API readiness behavior, shortcut timing, protected fields, target changes, Unicode input layout, delivery guards, final audio chunk ordering, recording cancellation races, repeated hold/hands-free recording sessions, microphone disconnection, recording limits, transcription cancellation and stale responses, provider errors, binary audio uploads, request deduplication, local API access controls, and transcription rate limits.
+The tests cover lifecycle cancellation, late results, destination freezing, duplicate completion, insights calculations, local SQLite persistence, API readiness behavior, shortcut timing, protected fields, target changes, Unicode input layout, delivery guards, final audio chunk ordering, recording cancellation races, repeated hold/hands-free recording sessions, microphone disconnection, recording limits, transcription cancellation and stale responses, provider errors, binary audio uploads, request deduplication, local API access controls, transcription rate limits, structured cleanup validation, cleanup cancellation and late responses, preservation of the original transcript on failure, and cleanup retries without another transcription.
 
 Electron Forge configuration is included for Windows packaging. This source build currently requires local Python; a self-contained Windows helper must be bundled before distributing an installer. Signing and public distribution are separate from running the source locally.

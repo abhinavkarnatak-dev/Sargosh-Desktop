@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, powerMonitor, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
+import { RecordingCommands } from './recording-commands';
+import { enableOverlayInput } from './overlay-input';
 import { pathToFileURL } from 'node:url';
+import { MAX_CLEANUP_CHARS, type CleanupRequest } from '../shared/cleanup';
 import { DesktopTranscriber } from './transcription';
 import { audioType, isRequestId, isSpeechLanguage, type TranscriptionRequest, type TranscriptionStatus } from '../shared/transcription';
 import { Helper } from './helper';
@@ -18,6 +21,7 @@ let tray: Tray | undefined;
 let quitting = false;
 const helper = new Helper();
 const transcriber = new DesktopTranscriber();
+const recordingCommands = new RecordingCommands();
 let transcriptionStatus: TranscriptionStatus = { phase: 'idle', message: '' };
 let recordingState: RecordingState = { ...INITIAL_RECORDING_STATE };
 let windowsState: WindowsState = { ...INITIAL_WINDOWS_STATE };
@@ -28,6 +32,7 @@ function recordingUpdate(state: RecordingState) {
   }
 }
 function stopOwner(message: string) {
+  recordingCommands.cancelAll();
   transcriber.cancelAll();
   transcriptionStatus = { phase: 'cancelled', message: 'Transcription cancelled.' };
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('sargosh:transcription-state', transcriptionStatus);
@@ -56,6 +61,7 @@ function createWindow(overlay = false): BrowserWindow {
     icon: path.join(root, 'assets', 'app-icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, backgroundThrottling: false }
   });
+  if (overlay) enableOverlayInput(window);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => { if (!trustedURL(url)) event.preventDefault(); });
   if (rendererURL) void window.loadURL(rendererURL + (overlay ? '/#overlay' : '/')); else void window.loadFile(rendererFile, { hash: overlay ? 'overlay' : '' });
@@ -100,6 +106,12 @@ if (ownsLock) {
           typeof request.mimeType !== 'string' || !audioType(request.mimeType)) throw new Error('Invalid audio transcription request.');
       return transcriber.transcribe(request);
     });
+    ipcMain.handle('sargosh:cleanup', (event, request: CleanupRequest) => {
+      checkSender(event);
+      if (event.sender !== mainWindow?.webContents || !request || !isRequestId(request.requestId) || !isSpeechLanguage(request.language) ||
+          typeof request.text !== 'string' || !request.text.trim() || request.text.length > MAX_CLEANUP_CHARS) throw new Error('Invalid cleanup request.');
+      return transcriber.cleanup(request);
+    });
     ipcMain.handle('sargosh:transcription-cancel', (event, requestId: unknown) => {
       checkSender(event);
       if (event.sender !== mainWindow?.webContents || !isRequestId(requestId)) throw new Error('Invalid transcription cancellation.');
@@ -132,17 +144,26 @@ if (ownsLock) {
     });
     handle('sargosh:recording-action', (action: unknown) => {
       if (action !== 'cancel' && action !== 'finish') throw new Error('Invalid recording action.');
-      mainWindow?.webContents.send('sargosh:recording-command', action);
+      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) throw new Error('The recording window is unavailable.');
+      const owner = mainWindow.webContents;
+      return recordingCommands.run(owner.id, action, command => owner.send('sargosh:recording-command', command));
+    });
+    ipcMain.handle('sargosh:recording-command-result', (event, result: unknown) => {
+      checkSender(event);
+      if (event.sender !== mainWindow?.webContents || !result || typeof result !== 'object') throw new Error('Invalid recording control response.');
+      const value = result as { id?: unknown; ok?: unknown };
+      if (typeof value.id !== 'string' || value.id.length > 100 || typeof value.ok !== 'boolean') throw new Error('Invalid recording control response.');
+      recordingCommands.settle(event.sender.id, value.id, value.ok);
     });
     handle('sargosh:recording-start', (shortcut: unknown) => {
-      if (recordingBusy(recordingState) || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Finish recording before changing shortcuts.');
+      if (recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Finish recording before changing shortcuts.');
       const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
       return helper.call('windows.arm', { shortcut, ignoredProcessIds, purpose: 'recording' });
     });
     powerMonitor.on('suspend', () => stopOwner('The computer went to sleep. Any active recording was discarded.'));
 
     handle('sargosh:windows-start', (shortcut: unknown) => {
-      if (recordingBusy(recordingState) || !dev || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Invalid Windows test request.');
+      if (recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || !dev || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Invalid Windows test request.');
       const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
       return helper.call('windows.arm', { shortcut, ignoredProcessIds });
     });
@@ -182,4 +203,4 @@ if (ownsLock) {
   }).catch(error => { console.error(error); app.quit(); });
 }
 app.on('window-all-closed', () => { /* The tray owns the application lifetime. */ });
-app.on('before-quit', () => { transcriber.cancelAll(); quitting = true; helper.stop(); tray?.destroy(); });
+app.on('before-quit', () => { recordingCommands.cancelAll(); transcriber.cancelAll(); quitting = true; helper.stop(); tray?.destroy(); });
