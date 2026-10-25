@@ -10,6 +10,8 @@ describe('Electron-to-Python message bridge', () => {
     try {
       await helper.start(process.cwd(), directory);
       expect(helper.ready).toBe(true);
+      expect(await helper.call('windows.status')).toMatchObject({ enabled: false, purpose: 'input-test' });
+      await expect(helper.call('windows.arm', { shortcut: 'Control+Alt+Space', purpose: 'invalid' })).rejects.toThrow('Local operation failed');
       await helper.call('preferences', { theme: 'dark' });
       const snapshot = await helper.call<{ preferences: { theme: string }; history: unknown[] }>('snapshot');
       expect(snapshot.preferences.theme).toBe('dark');

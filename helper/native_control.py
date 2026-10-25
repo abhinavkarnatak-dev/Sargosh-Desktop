@@ -9,7 +9,7 @@ from shortcuts import parse_shortcut
 
 
 def initial_state():
-    return {'revision': 0, 'enabled': False, 'shortcut': 'Control+Alt+Space', 'phase': 'idle', 'mode': None,
+    return {'revision': 0, 'enabled': False, 'purpose': 'input-test', 'shortcut': 'Control+Alt+Space', 'phase': 'idle', 'mode': None,
             'sessionId': None, 'target': None, 'deliveryAttempted': False,
             'message': 'Start the Windows input test to check shortcuts and destinations.'}
 
@@ -32,7 +32,7 @@ class WindowsService:
 
     def _publish(self, message=None):
         state = {'revision': self.state['revision'] + 1, 'enabled': self.uia is not None and self.keyboard is not None,
-                 'shortcut': self.state['shortcut'], **self.session.snapshot()}
+                 'shortcut': self.state['shortcut'], 'purpose': self.state['purpose'], **self.session.snapshot()}
         if message:
             state['message'] = message
         with self.lock:
@@ -46,6 +46,8 @@ class WindowsService:
             return self.status()
         if method == 'arm':
             parse_shortcut(params.get('shortcut'))
+            if params.get('purpose', 'input-test') not in ('input-test', 'recording'):
+                raise ValueError('Invalid input purpose')
             ignored = params.get('ignoredProcessIds', [])
             if not isinstance(ignored, list) or len(ignored) > 100 or any(type(pid) is not int or pid <= 0 for pid in ignored):
                 raise ValueError('Invalid process exclusions')
@@ -135,6 +137,7 @@ class WindowsService:
             self._release()
             self.session = DestinationSession()
             self.state['shortcut'] = params['shortcut']
+            self.state['purpose'] = params.get('purpose', 'input-test')
             try:
                 from windows_uia import UIAutomation
                 from windows_keyboard import KeyboardHook

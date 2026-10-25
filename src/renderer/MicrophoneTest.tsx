@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Mic, Square } from 'lucide-react';
-export function MicrophoneTest({ microphoneId, onDevices }: { microphoneId: string; onDevices(devices: MediaDeviceInfo[]): void }) {
+export function MicrophoneTest({ microphoneId, onDevices, disabled = false }: { microphoneId: string; onDevices(devices: MediaDeviceInfo[]): void; disabled?: boolean }) {
   const [testing, setTesting] = useState(false);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState('');
@@ -18,7 +18,9 @@ export function MicrophoneTest({ microphoneId, onDevices }: { microphoneId: stri
   }
   useEffect(() => { alive.current = true; return () => { alive.current = false; release(); }; }, []);
   useEffect(() => { generation.current++; release(); setTesting(false); setLevel(0); }, [microphoneId]);
+  useEffect(() => { if (disabled) { generation.current++; release(); setTesting(false); setLevel(0); } }, [disabled]);
   async function start() {
+    if (disabled) return;
     if (starting.current) return;
     starting.current = true; setBusy(true); setError('');
     const requestGeneration = generation.current;
@@ -45,5 +47,5 @@ export function MicrophoneTest({ microphoneId, onDevices }: { microphoneId: stri
       if (alive.current) setError('Could not open the microphone. Check Windows microphone access and your selected device.');
     } finally { starting.current = false; if (alive.current) setBusy(false); }
   }
-  return <div className="microphone-test"><div className="mic-test-header"><div><strong>Check your microphone</strong><p>This test stays on your computer. Nothing is recorded or uploaded.</p></div><button className="button secondary" disabled={busy} onClick={() => testing ? (release(), setTesting(false), setLevel(0)) : void start()}>{testing ? <Square size={14} /> : <Mic size={15} />}{busy ? 'Opening...' : testing ? 'Stop test' : 'Test microphone'}</button></div><div className="meter" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={level}><span style={{ width: level + '%' }} /></div><span className="meter-caption">{testing ? 'Speak naturally. The bar follows your microphone level.' : 'The microphone is off.'}</span>{error && <p className="error-message" role="alert">{error}</p>}</div>;
+  return <div className="microphone-test"><div className="mic-test-header"><div><strong>Check your microphone</strong><p>This test stays on your computer. Nothing is recorded or uploaded.</p></div><button className="button secondary" disabled={busy || disabled} onClick={() => testing ? (release(), setTesting(false), setLevel(0)) : void start()}>{testing ? <Square size={14} /> : <Mic size={15} />}{busy ? 'Opening...' : testing ? 'Stop test' : 'Test microphone'}</button></div><div className="meter" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={level}><span style={{ width: level + '%' }} /></div><span className="meter-caption">{testing ? 'Speak naturally. The bar follows your microphone level.' : 'The microphone is off.'}</span>{error && <p className="error-message" role="alert">{error}</p>}</div>;
 }

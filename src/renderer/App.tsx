@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { BarChart3, Check, ChevronRight, Copy, Mic, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Play, Settings, ShieldCheck, Trash2, X } from 'lucide-react';
 import { EMPTY_SNAPSHOT, type Preferences, type RuntimeStatus, type Snapshot } from '../shared/types';
 import { wordsPerMinute } from '../shared/insights';
+import { RecordingPanel } from './RecordingPanel';
+import { setRecordingPreferences } from './audio/runtime';
 import { Insights } from './Insights';
 import { SettingsDialog } from './SettingsDialog';
 
@@ -39,6 +41,7 @@ export function App() {
     if (!deleting || !window.sargosh) return;
     try { await window.sargosh.deleteEntry(deleting); setDeleting(null); await refresh(); } catch { setNotice('The recording could not be deleted.'); }
   }
+  useEffect(() => { setRecordingPreferences(snapshot.preferences); }, [snapshot.preferences]);
   const collapsed = snapshot.preferences.collapsed;
   return <div className={collapsed ? 'app-shell collapsed' : 'app-shell'}>
     <aside className="sidebar">
@@ -68,6 +71,7 @@ export function App() {
             <section className="dictation-stat"><Mic size={19} strokeWidth={1.5} /><div><span className="stat-number">{snapshot.totalWords.toLocaleString()}</span><span className="stat-label">total words dictated</span></div></section>
             <section className="dictation-stat"><BarChart3 size={19} strokeWidth={1.5} /><div><span className="stat-number">{wordsPerMinute(snapshot.totalWords, snapshot.totalDurationMs)}<small>wpm</small></span><span className="stat-label">average dictation speed</span></div></section>
           </div>
+          <RecordingPanel preferences={snapshot.preferences} />
           <section className="history-section" aria-labelledby="history-heading">
             <div className="section-heading"><h2 id="history-heading">Your dictations</h2><span><ShieldCheck size={13} /> Stored locally</span></div>
             {!snapshot.history.length ? <div className="empty-history"><div className="empty-icon"><Mic size={25} strokeWidth={1.5} /></div><h3>Your first words belong here.</h3><p>Once dictation is connected, your recordings and<br className="desktop-break" /> transcribed text will appear in this space.</p><button className="text-button" onClick={() => setSettings(true)}>Check your microphone <ChevronRight size={15} /></button></div> :
@@ -79,7 +83,7 @@ export function App() {
               <div className="menu-wrap"><button className="icon-button" aria-label="Recording options" aria-expanded={menu === entry.id} onClick={() => setMenu(menu === entry.id ? null : entry.id)}><MoreHorizontal size={18} /></button>{menu === entry.id && <div className="context-menu"><button disabled title="Cloud transcription is not connected">Retry transcription</button><button className="danger-text" onClick={() => { setMenu(null); setDeleting(entry.id); }}><Trash2 size={14} />Delete</button></div>}</div>
               </div></article>)}</div>}
           </section>
-          <div className="build-note"><span className="outline-tag">Development build</span><p>Explore your workspace and test your microphone. Sign-in and cloud dictation are not connected yet.</p></div>
+          <div className="build-note"><span className="outline-tag">Development build</span><p>Record local audio and explore your workspace. Sign-in and cloud dictation are not connected yet.</p></div>
         </> : <Insights snapshot={snapshot} />}
         <footer className="page-footer"><span>Speak freely. Stay in your flow.</span><span>SARGOSH</span></footer>
       </div>

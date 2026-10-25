@@ -1,3 +1,4 @@
+import type { RecordingState } from './recording';
 import type { WindowsState } from './windows';
 export type Theme = 'system' | 'light' | 'dark';
 export interface Preferences { theme: Theme; microphoneId: string; collapsed: boolean; shortcut: string }
@@ -6,6 +7,12 @@ export interface DayActivity { date: string; words: number }
 export interface Snapshot { preferences: Preferences; history: HistoryEntry[]; activity: DayActivity[]; totalWords: number; recordingCount: number; totalDurationMs: number }
 export interface RuntimeStatus { desktop: boolean; helper: boolean; api: boolean; auth: boolean; stt: boolean; cleanup: boolean }
 export interface DesktopBridge {
+  startWindowsRecording(shortcut: string): Promise<WindowsState>;
+  reportRecording(state: RecordingState): Promise<void>;
+  recordingStatus(): Promise<RecordingState>;
+  recordingAction(action: 'cancel' | 'finish'): Promise<void>;
+  onRecordingState(listener: (state: RecordingState) => void): () => void;
+  onRecordingCommand(listener: (action: 'cancel' | 'finish') => void): () => void;
   windowsStatus(): Promise<WindowsState>;
   startWindowsTest(shortcut: string): Promise<WindowsState>;
   windowsAction(action: 'cancel' | 'finish' | 'start-hands-free' | 'disarm'): Promise<WindowsState>;

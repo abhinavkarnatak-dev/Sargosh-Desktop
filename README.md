@@ -2,7 +2,7 @@
 
 Sargosh is a Windows dictation companion designed to turn natural speech into text in the apps you use. Its interface brings together a floating dictation control, a local recording history, and simple usage insights.
 
-The source currently provides a runnable desktop workspace, an idle overlay, light and dark themes, local preferences and statistics storage, and an on-device microphone level test. An opt-in Windows input test checks hold-to-talk, double-tap hands-free, editable-field tracking, and clipboard-free delivery of a fixed sentence. It does not record audio. Account sign-in, cloud transcription, cleanup, and actual voice-to-text delivery are not available in this build.
+The source currently provides a runnable desktop workspace, an idle overlay, light and dark themes, local preferences and statistics storage, an on-device microphone level test, and local audio recording with playback. An opt-in Windows input test checks hold-to-talk, double-tap hands-free, editable-field tracking, and clipboard-free delivery of a fixed sentence. The fixed-text Windows input test does not record audio. Account sign-in, cloud transcription, cleanup, and actual voice-to-text delivery are not available in this build.
 
 ## Using the desktop workspace
 
@@ -11,7 +11,8 @@ The source currently provides a runnable desktop workspace, an idle overlay, lig
 - **Settings** contains theme and microphone preferences and a microphone test.
 - The tray icon reopens Sargosh. Closing the main window hides it; choose **Quit Sargosh** from the tray menu to exit.
 - The floating pill expands on hover. Its microphone button opens the main app. The grip moves the control.
-- The microphone test processes sound levels on your computer. It does not save or upload audio.
+- The microphone level test processes sound levels on your computer. It does not save or upload audio.
+- **Check your recording** captures a temporary local clip with start, finish, cancel, playback, and discard controls.
 
 ## Run from source
 
@@ -51,6 +52,20 @@ The local Fastify service supplies health and connection-status endpoints. Cloud
 
 The agreed dictation design is record-then-upload, with Deepgram recognition and Gemini Flash-Lite cleanup. Recordings and transcript history belong on the computer; account and usage data belong in managed PostgreSQL with Supabase Auth. Cloud processing will transmit audio and text to the respective providers when enabled.
 
+## Record and play local audio
+
+On **Dictation**, use **Start recording**, speak after **Listening** appears, and choose **Finish recording**. The app collects the last audio chunk before making playback available. **Cancel recording** discards that session, including audio that arrives late. You can cancel during microphone startup or finalization too.
+
+The browser preview supports the recording buttons. For background recording, open Electron with `npm run dev:desktop` while the preview services are running. Choose your microphone in Settings, then select **Enable recording shortcuts** on Dictation. Hold and release your configured shortcut, or double-tap to start hands-free and double-tap again to finish. Separate sessions can use either mode in any order. The overlay shows microphone activity and offers cancel and hands-free finish controls. Closing the main window to the tray keeps recording available.
+
+Microphone access starts when you begin a recording, including the brief shortcut-recognition interval, and stops on finish or cancellation. It is not kept open while idle. A very short first attempt can finish before the microphone becomes ready; the app discards it and explains why. A short unconfirmed single tap is also discarded.
+
+Each session is limited to 5 minutes and 25 MiB. No microphone activity for several seconds produces a level warning, not a speech-recognition result. Permission failures, a disconnected microphone, empty output, and audio finalization timeouts are reported without uploading or retrying the audio. Changing the selected microphone applies to the next recording.
+
+Only the latest finished clip is kept in memory. A new recording replaces it; **Discard audio**, a page reload, or app exit removes it. These clips are not written to SQLite, counted in Insights, or sent to Deepgram or Gemini. The saved input target is retained for future transcription delivery, but recording mode does not insert the fixed test sentence.
+
+The main renderer owns one microphone and recorder. The overlay receives state and sends commands through Electron; it never opens a second recorder. The main renderer's background timer throttling is disabled so hiding it does not suspend recording controls. Reloading the owner, losing Windows input access, or putting the computer to sleep cancels active recording and disarms shortcuts.
+
 ## Check Windows input behavior
 
 In the Electron app, open **Settings > General > Shortcuts > View**. The development-only Windows input test lets you select a shortcut, start the hook, observe a session, and insert the fixed sentence **Sargosh input test.** after finishing.
@@ -77,7 +92,7 @@ Browser preview cannot access these native Windows controls. Restricted executio
 
 ## Storage and privacy
 
-The microphone test does not retain audio. Local development preferences survive restarts. There is no signed-in account in this build; its development store is separate from future account-specific history.
+The microphone level test does not retain audio. Recording previews remain in memory only and are removed when replaced, discarded, reloaded, or closed. Local development preferences survive restarts. There is no signed-in account in this build; its development store is separate from future account-specific history.
 
 Successful recording metrics are stored independently of history entries so deleting history does not erase accumulated statistics. Retrying an existing recording does not count it twice. Dictation speed is total finalized words divided by total recording time in minutes, including pauses.
 
@@ -91,6 +106,6 @@ npm test
 npm run build
 ```
 
-The tests cover lifecycle cancellation, late results, destination freezing, duplicate completion, insights calculations, local SQLite persistence, API readiness behavior, shortcut timing, protected fields, target changes, Unicode input layout, and delivery guards.
+The tests cover lifecycle cancellation, late results, destination freezing, duplicate completion, insights calculations, local SQLite persistence, API readiness behavior, shortcut timing, protected fields, target changes, Unicode input layout, delivery guards, final audio chunk ordering, recording cancellation races, repeated hold/hands-free recording sessions, microphone disconnection, and recording limits.
 
 Electron Forge configuration is included for Windows packaging. This source build currently requires local Python; a self-contained Windows helper must be bundled before distributing an installer. Signing and public distribution are separate from running the source locally.

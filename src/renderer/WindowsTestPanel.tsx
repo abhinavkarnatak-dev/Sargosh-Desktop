@@ -24,6 +24,7 @@ export function WindowsTestPanel({ shortcut, onShortcut }: { shortcut: string; o
     } catch { setError('The Windows test could not complete. Restart it before trying again.'); }
     finally { setBusy(false); }
   }
+  if (state.enabled && state.purpose === 'recording') return <section className="windows-test" aria-label="Recording shortcuts active"><strong>Recording shortcuts are active</strong><p className="inline-help">Use the recording controls on Dictation. Disable recording shortcuts there before changing the shortcut or running the fixed-text input test.</p></section>;
   return <section className="windows-test" aria-labelledby="windows-test-title">
     <div className="windows-test-heading"><Keyboard size={17} /><div><h3 id="windows-test-title">Windows input test</h3><p>Development only. No audio is recorded and no AI service is called.</p></div></div>
     {!window.sargosh ? <p className="inline-help">Open the Electron desktop app to test global shortcuts and text insertion. These controls cannot run in a browser preview.</p> : <>

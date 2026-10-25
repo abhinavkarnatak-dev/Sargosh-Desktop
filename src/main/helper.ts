@@ -20,7 +20,9 @@ export class Helper {
       windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
     });
     const fail = () => {
+      const wasReady = this.ready;
       this.ready = false;
+      if (wasReady) for (const listener of this.listeners) listener('helper.unavailable', null);
       for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Local helper is unavailable.')); }
       this.pending.clear();
     };

@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Info, Monitor, Moon, Settings, Sun, User, X } from 'lucide-react';
 import type { Preferences, RuntimeStatus, Theme } from '../shared/types';
+import { useRecording } from './audio/runtime';
+import { recordingBusy } from '../shared/recording';
 import { MicrophoneTest } from './MicrophoneTest';
 import { WindowsTestPanel } from './WindowsTestPanel';
 export function SettingsDialog({ preferences, runtime, onSave, onClose }: { preferences: Preferences; runtime: RuntimeStatus; onSave(update: Partial<Preferences>): Promise<void>; onClose(): void }) {
+  const recordingState = useRecording();
   const [tab, setTab] = useState<'general' | 'account'>('general');
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [details, setDetails] = useState<'shortcuts' | 'languages' | null>(null);
@@ -26,7 +29,7 @@ export function SettingsDialog({ preferences, runtime, onSave, onClose }: { pref
           {details === 'languages' && <div className="inline-detail"><Info size={16} /><p>Language choices will be available when Deepgram is connected. Only languages supported by the selected model will appear.</p></div>}
           <div className="setting-row"><div><strong>Theme</strong><p>Choose how Sargosh looks.</p></div><div className="theme-picker" role="group" aria-label="Theme">{([{ value: 'system', Icon: Monitor, label: 'System' }, { value: 'light', Icon: Sun, label: 'Light' }, { value: 'dark', Icon: Moon, label: 'Dark' }] as const).map(({ value, Icon, label }) => <button key={value} className={preferences.theme === value ? 'selected' : ''} aria-pressed={preferences.theme === value} onClick={() => void onSave({ theme: value as Theme })}><Icon size={15} />{label}</button>)}</div></div>
         </div>
-        <MicrophoneTest microphoneId={preferences.microphoneId} onDevices={setDevices} />
+        <MicrophoneTest disabled={recordingBusy(recordingState)} microphoneId={preferences.microphoneId} onDevices={setDevices} />
         <details className="service-details"><summary>Development connection status</summary><ul><li><span>Desktop app</span><Status ready={runtime.desktop} /></li><li><span>Local history helper</span><Status ready={runtime.helper} /></li><li><span>Local API</span><Status ready={runtime.api} /></li><li><span>Account sign-in</span><Status ready={runtime.auth} /></li><li><span>Speech recognition</span><Status ready={runtime.stt} /></li><li><span>Text cleanup</span><Status ready={runtime.cleanup} /></li></ul></details>
       </> : <>
         <p className="eyebrow">YOUR SPACE</p><h2>Account</h2><p className="subtitle">Your profile and sign-in preferences.</p>

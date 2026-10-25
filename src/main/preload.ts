@@ -1,7 +1,22 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { RecordingState } from '../shared/recording';
 import type { WindowsState } from '../shared/windows';
 import type { DesktopBridge } from '../shared/types';
 const bridge: DesktopBridge = {
+  startWindowsRecording: shortcut => ipcRenderer.invoke('sargosh:recording-start', shortcut),
+  reportRecording: state => ipcRenderer.invoke('sargosh:recording-report', state),
+  recordingStatus: () => ipcRenderer.invoke('sargosh:recording-status'),
+  recordingAction: action => ipcRenderer.invoke('sargosh:recording-action', action),
+  onRecordingState: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, state: RecordingState) => listener(state);
+    ipcRenderer.on('sargosh:recording-state', handler);
+    return () => { ipcRenderer.removeListener('sargosh:recording-state', handler); };
+  },
+  onRecordingCommand: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, action: 'cancel' | 'finish') => listener(action);
+    ipcRenderer.on('sargosh:recording-command', handler);
+    return () => { ipcRenderer.removeListener('sargosh:recording-command', handler); };
+  },
   windowsStatus: () => ipcRenderer.invoke('sargosh:windows-status'),
   startWindowsTest: shortcut => ipcRenderer.invoke('sargosh:windows-start', shortcut),
   windowsAction: action => ipcRenderer.invoke('sargosh:windows-action', action),

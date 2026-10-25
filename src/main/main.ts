@@ -1,7 +1,9 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, powerMonitor, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Helper } from './helper';
+import { INITIAL_RECORDING_STATE, MAX_AUDIO_BYTES, recordingBusy, type RecordingState } from '../shared/recording';
+import { INITIAL_WINDOWS_STATE, type WindowsState } from '../shared/windows';
 import type { Preferences, RuntimeStatus } from '../shared/types';
 const root = path.resolve(__dirname, '../..');
 const dev = !app.isPackaged;
@@ -13,6 +15,19 @@ let overlayWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let quitting = false;
 const helper = new Helper();
+let recordingState: RecordingState = { ...INITIAL_RECORDING_STATE };
+let windowsState: WindowsState = { ...INITIAL_WINDOWS_STATE };
+function recordingUpdate(state: RecordingState) {
+  recordingState = { ...state, revision: recordingState.revision + 1 };
+  for (const window of [mainWindow, overlayWindow]) {
+    if (window && !window.isDestroyed()) window.webContents.send('sargosh:recording-state', recordingState);
+  }
+}
+function stopOwner(message: string) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sargosh:recording-command', 'cancel');
+  void helper.call('windows.disarm').catch(() => {});
+  recordingUpdate({ ...INITIAL_RECORDING_STATE, phase: 'failed', message });
+}
 const ownsLock = app.requestSingleInstanceLock();
 if (!ownsLock) app.quit();
 const rendererFile = path.join(root, 'dist', 'renderer', 'index.html');
@@ -32,7 +47,7 @@ function createWindow(overlay = false): BrowserWindow {
     title: 'Sargosh', show: false, autoHideMenuBar: true, backgroundColor: overlay ? '#00000000' : '#f7f6f2',
     ...(overlay ? { frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true, resizable: false, focusable: false } : {}),
     icon: path.join(root, 'assets', 'app-icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true }
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, backgroundThrottling: false }
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => { if (!trustedURL(url)) event.preventDefault(); });
@@ -42,6 +57,10 @@ function createWindow(overlay = false): BrowserWindow {
     const area = screen.getPrimaryDisplay().workArea;
     window.setPosition(Math.round(area.x + (area.width - 360) / 2), area.y + area.height - 135);
   } else {
+    window.webContents.on('render-process-gone', () => stopOwner('The recording window stopped. Reopen Sargosh before recording again.'));
+    window.webContents.on('did-start-loading', () => {
+      if (recordingBusy(recordingState) || windowsState.purpose === 'recording') stopOwner('The app reloaded. Any active recording was discarded.');
+    });
     window.on('close', event => { if (!quitting) { event.preventDefault(); window.hide(); } });
   }
   return window;
@@ -58,14 +77,45 @@ if (ownsLock) {
     session.defaultSession.setPermissionCheckHandler((contents, permission, origin) => permission === 'media' && Boolean(contents) && trustedURL(contents!.getURL()) && trustedURL(origin));
     try { await helper.start(root, path.join(root, '.local', 'development')); } catch { console.error('Python helper did not start. Check your Python installation.'); }
     helper.onEvent((event, data) => {
+      if (event === 'helper.unavailable') { stopOwner('Windows input access stopped. Recording cancelled. Restart Sargosh.'); return; }
       if (event !== 'windows.state') return;
+      windowsState = data as WindowsState;
       for (const window of [mainWindow, overlayWindow]) {
         if (window && !window.isDestroyed()) window.webContents.send('sargosh:windows-state', data);
       }
     });
     handle('sargosh:windows-status', () => helper.call('windows.status'));
+    handle('sargosh:recording-status', () => recordingState);
+    ipcMain.handle('sargosh:recording-report', (event, value: RecordingState) => {
+      checkSender(event);
+      if (event.sender !== mainWindow?.webContents) throw new Error('Only the recording owner can publish audio state.');
+      if (!value || !['idle', 'opening', 'recording', 'finishing', 'ready', 'cancelled', 'failed'].includes(value.phase) ||
+          !Number.isFinite(value.level) || value.level < 0 || value.level > 100 ||
+          !Number.isFinite(value.durationMs) || value.durationMs < 0 || value.durationMs > 400000 ||
+          typeof value.message !== 'string' || value.message.length > 400 ||
+          (value.sessionId !== null && (typeof value.sessionId !== 'string' || value.sessionId.length > 100)) ||
+          ![null, 'hold', 'hands-free', 'manual'].includes(value.mode) || typeof value.quiet !== 'boolean' ||
+          (value.clip !== null && (!Number.isFinite(value.clip.bytes) || value.clip.bytes < 0 || value.clip.bytes > MAX_AUDIO_BYTES || typeof value.clip.mimeType !== 'string' || value.clip.mimeType.length > 100))) {
+        throw new Error('Invalid recording state.');
+      }
+      recordingUpdate({ revision: 0, phase: value.phase, sessionId: value.sessionId, mode: value.mode,
+        durationMs: value.durationMs, level: value.level, quiet: value.quiet, message: value.message,
+        clip: value.clip ? { bytes: value.clip.bytes, mimeType: value.clip.mimeType } : null,
+        target: windowsState.sessionId === value.sessionId ? windowsState.target : null });
+    });
+    handle('sargosh:recording-action', (action: unknown) => {
+      if (action !== 'cancel' && action !== 'finish') throw new Error('Invalid recording action.');
+      mainWindow?.webContents.send('sargosh:recording-command', action);
+    });
+    handle('sargosh:recording-start', (shortcut: unknown) => {
+      if (recordingBusy(recordingState) || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Finish recording before changing shortcuts.');
+      const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
+      return helper.call('windows.arm', { shortcut, ignoredProcessIds, purpose: 'recording' });
+    });
+    powerMonitor.on('suspend', () => stopOwner('The computer went to sleep. Any active recording was discarded.'));
+
     handle('sargosh:windows-start', (shortcut: unknown) => {
-      if (!dev || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Invalid Windows test request.');
+      if (recordingBusy(recordingState) || !dev || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Invalid Windows test request.');
       const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
       return helper.call('windows.arm', { shortcut, ignoredProcessIds });
     });
