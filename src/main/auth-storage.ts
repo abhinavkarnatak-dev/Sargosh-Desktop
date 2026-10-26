@@ -23,5 +23,6 @@ export class AuthStorage {
   getItem(key: string) { return this.run(async () => (await this.read())[key] ?? null); }
   setItem(key: string, value: string) { return this.run(async () => { const data = await this.read(); data[key] = value; await this.write(data); }); }
   removeItem(key: string) { return this.run(async () => { const data = await this.read(); delete data[key]; if (Object.keys(data).length) await this.write(data); else await unlink(this.file).catch(error => { if (error.code !== 'ENOENT') throw error; }); }); }
+  clear() { return this.run(async () => { await unlink(this.file).catch(error => { if (error.code !== 'ENOENT') throw error; }); await unlink(this.file + '.tmp').catch(error => { if (error.code !== 'ENOENT') throw error; }); }); }
   drain() { return this.tail; }
 }

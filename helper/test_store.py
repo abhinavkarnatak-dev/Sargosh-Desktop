@@ -37,6 +37,38 @@ class StoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.store.select_account(invalid)
 
+    def test_delete_account_removes_only_its_database_and_recordings_and_keeps_legacy_owner(self):
+        first = '11111111-1111-4111-8111-111111111111'
+        second = '22222222-2222-4222-8222-222222222222'
+        for target in (first, second):
+            directory = Path(self.store.select_account(target)['directory'])
+            self.store.add(self.entry(), '2026-10-25')
+            self.store.preferences({'theme': 'dark'})
+            (directory / 'recordings').mkdir()
+            (directory / 'recordings' / ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.audio')).write_bytes(b'audio')
+        self.store.delete_account(first)
+        self.assertFalse(self.path.exists())
+        self.assertTrue((self.store.base / 'legacy-owner.json').exists())
+        self.assertFalse((self.store.base / 'recordings').exists())
+        self.store.select_account(second)
+        self.assertEqual(len(self.store.snapshot()['history']), 1)
+        self.assertEqual(self.store.preferences()['theme'], 'dark')
+        self.store.delete_account(second)
+        self.assertFalse((self.store.base / 'accounts' / second).exists())
+        self.assertEqual(self.store.snapshot()['history'], [])
+        self.store.delete_account(second)  # Interrupted cleanup can be retried.
+
+    def test_delete_account_rejects_paths_and_never_recursively_removes_shared_files(self):
+        user = '11111111-1111-4111-8111-111111111111'
+        self.store.select_account(user)
+        other_file = self.store.base / 'keep.txt'
+        other_file.write_text('keep')
+        for invalid in ('../escape', None, '', 'signed-out'):
+            with self.assertRaises(ValueError):
+                self.store.delete_account(invalid)
+        self.store.delete_account(user)
+        self.assertEqual(other_file.read_text(), 'keep')
+
     def entry(self, status='completed'):
         return {'id': 'recording-a', 'createdAt': '2026-10-25T12:00:00Z', 'text': 'Hello world', 'words': 2, 'durationMs': 2000, 'status': status}
 

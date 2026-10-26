@@ -3,6 +3,7 @@ import { apiEndpoint } from '../shared/api-endpoint';
 import { readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { DesktopAuth } from './auth';
+import { AccountDeletion } from './account-deletion';
 import { AuthStorage } from './auth-storage';
 import { publicAuthConfig, hasProfileName } from '../shared/auth';
 import { retrySavedTranscript } from './history-retry';
@@ -168,6 +169,21 @@ if (ownsLock) {
     authAction('sargosh:auth-google-cancel', () => auth!.cancelGoogle());
     authAction('sargosh:auth-sign-out', () => auth!.signOut());
     authAction('sargosh:auth-profile', value => auth!.updateProfile(value?.firstName, value?.lastName));
+    const accountDeletion = new AccountDeletion(path.join(dataDirectory, 'account-cleanup.json'), async userId => {
+      await history?.drain();
+      await helper.call('account.delete', { userId }, 30000);
+      finishedRecordings.clear();
+    }, async () => { await auth!.forgetDeletedAccount(); });
+    authAction('sargosh:auth-delete', async confirmation => {
+      requireAccount();
+      if (confirmation !== 'DELETE') throw new Error('Confirm account deletion before continuing.');
+      const userId = auth!.snapshot().user!.id;
+      const token = await auth!.accessToken();
+      accountChanging = true;
+      let completed = false;
+      try { await accountDeletion.remove(apiBase, userId, token); completed = true; }
+      finally { accountChanging = !completed && accountDeletion.cloudDeleted; }
+    });
     ownerHandle('sargosh:history-save', async (request: HistoryCapture) => {
       const metadata = request && finishedRecordings.get(request.id);
       if (!metadata || !request.audio || request.audio.byteLength !== metadata.bytes || request.mimeType !== metadata.mimeType) throw new Error('Invalid finished recording.');
@@ -350,6 +366,7 @@ if (ownsLock) {
         return { desktop: true, helper: helper.ready, api: response.ok, auth: data.auth === true, stt: data.stt === true, cleanup: data.cleanup === true };
       } catch { return { desktop: true, helper: helper.ready, api: false, auth: false, stt: false, cleanup: false }; }
     });
+    await accountDeletion.recover();
     await auth.initialize();
     mainWindow = createWindow(); overlayWindow = createWindow(true);
     tray = new Tray(nativeImage.createFromPath(path.join(root, 'assets', 'app-icon.png')).resize({ width: 20, height: 20 }));

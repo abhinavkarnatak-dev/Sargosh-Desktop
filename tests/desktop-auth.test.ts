@@ -49,3 +49,13 @@ it('rejects non-six-digit email codes before calling Supabase',async()=>{
   for(const code of ['12345','1234567','12345678','abcdef','123 456'])await expect(auth.verifyCode('person@example.com',code)).rejects.toThrow('6-digit');
   expect(mock.verifyOtp).not.toHaveBeenCalled();await auth.verifyCode('person@example.com','012345');expect(mock.verifyOtp).toHaveBeenCalledExactlyOnceWith({email:'person@example.com',token:'012345',type:'email'});await auth.dispose();
 });
+
+it('clears saved credentials and switches away after account deletion even when remote sign-out is revoked', async () => {
+  const clear = vi.fn(async () => {});
+  mock.getSession.mockResolvedValue({data:{session},error:null});
+  const auth = new DesktopAuth({url:'https://fixture.supabase.co',key:'sb_publishable_fixture'}, {clear} as unknown as AuthStorage, switched, changes, async()=>{});
+  await auth.initialize(); mock.signOut.mockResolvedValueOnce({error:new Error('user already deleted')});
+  await auth.forgetDeletedAccount();
+  expect(clear).toHaveBeenCalledOnce(); expect(auth.snapshot().phase).toBe('signed-out'); expect(auth.snapshot().user).toBeNull(); expect(switched).toHaveBeenLastCalledWith(null);
+  await expect(auth.accessToken()).rejects.toThrow('Sign in'); await auth.dispose();
+});

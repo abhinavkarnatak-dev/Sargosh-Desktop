@@ -19,6 +19,7 @@ export interface DesktopBridge {
   signInGoogle(): Promise<void>;
   cancelGoogleSignIn(): Promise<void>;
   signOut(): Promise<void>;
+  deleteAccount(confirmation: 'DELETE'): Promise<void>;
   updateProfile(firstName: string, lastName: string): Promise<void>;
   saveHistory(request: HistoryCapture): Promise<void>;
   updateHistory(request: HistoryResult): Promise<void>;

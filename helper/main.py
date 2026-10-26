@@ -59,6 +59,33 @@ class Store:
                 json.dump(user_id, file)
         return {'directory': str(directory.resolve())}
 
+    def delete_account(self, user_id):
+        if not isinstance(user_id, str) or not re.fullmatch(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}', user_id):
+            raise ValueError('Invalid account')
+        owner_file = self.base / 'legacy-owner.json'
+        owner = json.loads(owner_file.read_text(encoding='utf-8')) if owner_file.exists() else None
+        directory = self.base if owner == user_id else self.base / 'accounts' / user_id
+        # Never recursively delete the shared root or follow redirected account paths.
+        for candidate in (self.base, self.base / 'accounts', directory, directory / 'recordings'):
+            if candidate.is_symlink() or (hasattr(candidate, 'is_junction') and candidate.is_junction()):
+                raise ValueError('Local account path is redirected')
+        if not directory.resolve().is_relative_to(self.base.resolve()):
+            raise ValueError('Invalid local account path')
+        if self.path == directory / 'history.sqlite3':
+            self.select_account(None)
+        recordings = directory / 'recordings'
+        if recordings.exists():
+            for file in recordings.iterdir():
+                if re.fullmatch(r'[a-f0-9-]{36}\.(audio|tmp|deleted)', file.name) and not file.is_dir():
+                    file.unlink()
+            recordings.rmdir()
+        for suffix in ('', '-wal', '-shm'):
+            (directory / ('history.sqlite3' + suffix)).unlink(missing_ok=True)
+        if directory != self.base and directory.exists():
+            directory.rmdir()
+        # Retain the ownership marker so a later account cannot claim the legacy root.
+        return True
+
     def preferences(self, update=None):
         if update is not None:
             allowed = {'theme', 'microphoneId', 'collapsed', 'shortcut'}
@@ -112,6 +139,7 @@ class Store:
         return {'entries': [self.history_row(row) for row in rows[:50]], 'hasMore': len(rows) > 50}
 
     def handle(self, method, params):
+        if method == 'account.delete': return self.delete_account(params.get('userId'))
         if method == 'account.select': return self.select_account(params.get('userId'))
         if method == 'ping': return {'ready': True, 'platform': sys.platform, 'capabilities': ['preferences', 'history', 'insights']}
         if method == 'snapshot': return self.snapshot()

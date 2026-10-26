@@ -15,7 +15,7 @@ export class DesktopAuth {
   private googleExchanging = false;
   private otpEmail = ''; private lastEmail = 0; private google = new GoogleCallback();
   private unsubscribe?: () => void; private generation = 0;
-  constructor(private config: { url: string; key: string } | undefined, storage: AuthStorage, private switched: (id: string | null) => Promise<void>, private changed: (state: AuthState) => void, private openBrowser: (url: string) => Promise<void>) {
+  constructor(private config: { url: string; key: string } | undefined, private storage: AuthStorage, private switched: (id: string | null) => Promise<void>, private changed: (state: AuthState) => void, private openBrowser: (url: string) => Promise<void>) {
     this.state.configured = Boolean(config);
     if (config) this.client = createClient(config.url, config.key, { auth: { storage, storageKey: 'sargosh-auth', persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, flowType: 'pkce' }, global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.any([this.shutdown.signal, ...(init?.signal ? [init.signal] : []), AbortSignal.timeout(15000)]), redirect: 'error' }) } });
   }
@@ -97,5 +97,12 @@ export class DesktopAuth {
     return data.session.access_token;
   }
   async signOut() { this.cancelGoogle(); const { error } = await this.ready().auth.signOut({ scope: 'local' }); if (error) throw new Error('Could not sign out. Check your connection and try again.'); await this.accept(null); }
+  async forgetDeletedAccount() {
+    this.generation++; this.cancelGoogle();
+    await this.ready().auth.stopAutoRefresh();
+    try { await this.ready().auth.signOut({ scope: 'local' }); } catch { /* The remote account may already be gone. */ }
+    await this.storage.clear();
+    await this.accept(null);
+  }
   async dispose() { this.disposed = true; this.generation++; this.unsubscribe?.(); this.google.close(); this.shutdown.abort(); await this.client?.auth.stopAutoRefresh(); await this.switching; }
 }

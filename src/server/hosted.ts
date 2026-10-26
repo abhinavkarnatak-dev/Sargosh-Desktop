@@ -14,6 +14,7 @@ export interface HostedOptions {
  usageStore?:UsageStore;apiKey?:string;geminiApiKey?:string;geminiModel?:CleanupModel;
  fetcher?:typeof fetch;geminiFetcher?:typeof fetch;allowedHosts?:string[];ffmpegPath?:string;
  sttRateMicroPerMinute?:number;
+ deleteAccount?:(userId:string)=>Promise<void>;
  normalize?:(input:Buffer,signal:AbortSignal)=>Promise<NormalizedAudio>;
 }
 export function createHostedServer(options:HostedOptions){
@@ -40,6 +41,17 @@ export function createHostedServer(options:HostedOptions){
  server.get('/v1/readiness',async()=>({auth:true,stt:true,cleanup:true}));
  server.get('/v1/usage',{onRequest:authorized},async(request,reply)=>{
   try{return await store.snapshot(owners.get(request)!);}catch{return reply.code(503).send({code:'USAGE_UNAVAILABLE',message:'Could not load your allowance. Please try again.'});}
+ });
+ server.delete('/v1/account',{onRequest:authorized,bodyLimit:1024},async(request,reply)=>{
+  const body=request.body as {confirmation?:unknown}|null;
+  if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length!==1||body.confirmation!=='DELETE')return reply.code(400).send({code:'DELETE_CONFIRMATION',message:'Confirm account deletion before continuing.'});
+  if(!options.deleteAccount)return reply.code(503).send({code:'DELETE_UNAVAILABLE',message:'Account deletion is unavailable. Please try later.'});
+  const userId=owners.get(request)!;
+  try{
+   await options.deleteAccount(userId);
+   for(const key of cache.keys())if(key.startsWith(userId+':'))cache.delete(key);
+   return {deleted:true};
+  }catch{return reply.code(503).send({code:'DELETE_FAILED',message:'Account deletion could not be confirmed. Please try again.'});}
  });
  server.addContentTypeParser(/^audio\/(webm|ogg|wav|mpeg|mp4)(?:\s*;.*)?$/i,{parseAs:'buffer',bodyLimit:MAX_AUDIO_BYTES},(_request,body,done)=>done(null,body));
  function cached(owner:string,kind:string,id:string,fingerprint:string){

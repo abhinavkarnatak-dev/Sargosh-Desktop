@@ -1,3 +1,4 @@
+import { accountDeleter } from './account';
 import { SupabaseUsageStore } from './usage';
 import { publicAuthConfig } from '../shared/auth';
 import { existsSync } from 'node:fs';
@@ -31,6 +32,7 @@ export function serverSettings(environment: NodeJS.ProcessEnv) {
   if(!Number.isSafeInteger(sttRateMicroPerMinute)||sttRateMicroPerMinute<1||sttRateMicroPerMinute>1000000)throw new Error('Invalid transcription accounting rate.');
   return {
     hostedMode,allowedHosts,sttRateMicroPerMinute,
+    deleteAccount: hostedMode ? accountDeleter(authConfig!.url, environment.SUPABASE_SERVER_KEY!.trim()) : undefined,
     usageStore:hostedMode?new SupabaseUsageStore(authConfig!.url,environment.SUPABASE_SERVER_KEY!.trim()):undefined,
     ffmpegPath:environment.FFMPEG_PATH||'ffmpeg',
     authConfig,

@@ -19,6 +19,7 @@ const bridge: DesktopBridge = {
   signInGoogle: () => authCall('sargosh:auth-google'),
   cancelGoogleSignIn: () => authCall('sargosh:auth-google-cancel'),
   signOut: () => authCall('sargosh:auth-sign-out'),
+  deleteAccount: confirmation => authCall('sargosh:auth-delete', confirmation),
   updateProfile: (firstName, lastName) => authCall('sargosh:auth-profile', { firstName, lastName }),
   saveHistory: request => ipcRenderer.invoke('sargosh:history-save', request),
   updateHistory: request => ipcRenderer.invoke('sargosh:history-update', request),

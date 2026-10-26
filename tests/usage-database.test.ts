@@ -50,3 +50,15 @@ it('keeps usage records server-only and blocks unverified accounts',async()=>{
  await reset();const result=await db.query<{blocked:boolean}>("select not has_function_privilege('authenticated','public.reserve_usage(uuid,text,text,text,integer,bigint)','EXECUTE') blocked");expect(result.rows[0].blocked).toBe(true);
  expect((await reserve('no-user',1,'44444444-4444-4444-8444-444444444444')).code).toBe('AUTH_REQUIRED');
 });
+
+it('retains spending totals after account deletion and rejects further reservations for that ID', async () => {
+ await reset();
+ const deleted='33333333-3333-4333-8333-333333333333';
+ await db.query('insert into auth.users values($1,now())',[deleted]);
+ const lease=await reserve('delete-check',10,deleted,'stt',1000);
+ expect(lease.code).toBe('OK'); await dispatch('delete-check',lease.leaseId,deleted);
+ await db.query("select public.finish_usage($1,'delete-check','stt',$2)",[deleted,lease.leaseId]);
+ await db.query('delete from auth.users where id=$1',[deleted]);
+ expect((await db.query<{cost:number}>('select sum(cost_micro)::integer cost from sargosh_private.usage_operations')).rows[0].cost).toBe(1000);
+ expect((await reserve('after-delete',1,deleted)).code).toBe('AUTH_REQUIRED');
+});
