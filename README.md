@@ -2,7 +2,7 @@
 
 Sargosh is a Windows dictation companion designed to turn natural speech into text in the apps you use. Its interface brings together a floating dictation control, a local recording history, and simple usage insights.
 
-The source provides a Windows desktop workspace with light and dark themes, a floating recording control, local audio playback, Deepgram transcription, and automatic Gemini Flash-Lite cleanup. An opt-in Windows input test checks clipboard-free delivery of a fixed sentence. Finished desktop dictations can insert text directly into the saved input without using the clipboard. Finished recordings and transcripts are saved locally and remain after restart. The desktop app supports Supabase email OTP sign-in, Google sign-in, saved sessions, and account-specific local history.
+The source provides a Windows desktop workspace with light and dark themes, a floating recording control, local audio playback, Deepgram transcription, and automatic Gemini Flash-Lite cleanup. An opt-in Windows input test checks clipboard-free delivery of a fixed sentence. Finished desktop dictations can insert text directly into the saved input without using the clipboard. Finished recordings and transcripts are saved locally and remain after restart. The desktop app supports Supabase email OTP sign-in, Google sign-in, saved sessions, and account-specific local history. The six-digit OTP appears in six themed boxes, with full-code paste, standard keyboard editing, and supported one-time-code autofill.
 
 ## Using the desktop workspace
 
@@ -15,7 +15,7 @@ The source provides a Windows desktop workspace with light and dark themes, a fl
 - **Settings** contains theme and microphone preferences and a microphone test. While Settings is open, the background stays still and cannot be interacted with. Click outside the dialog, press Escape, or use its close button to return.
 - The tray icon reopens Sargosh. Closing the main window hides it; choose **Quit Sargosh** from the tray menu to exit.
 - The floating pill expands on hover. Its microphone button opens the main app until recording shortcuts are enabled; it then starts hands-free recording. The grip moves the control. After you finish speaking, the control keeps the audio dots and shows a small loader on their right while your text is prepared. It does not display processing-stage names or cancel buttons during this step. Microphone warnings, no-speech results, and cancellation messages appear in a dismissible card above the pill. A card that opens Sargosh or microphone settings closes when that action succeeds; the pill stays visible. If text cannot be inserted, the card shows the prepared text and a Copy button.
-- The microphone level test processes sound levels on your computer. It does not save or upload audio.
+- The microphone list in setup and Settings refreshes when inputs connect or disconnect. Listing devices does not switch the microphone on. The microphone level test processes sound levels on your computer and does not save or upload audio.
 - New accounts receive a three-step setup modal: test a microphone locally, choose a saved shortcut, and practice a dictation. Completion is saved on the account, so subsequent logins and other devices do not repeat it. Accounts created before the tutorial rollout keep their existing dashboard flow. Practice has a separate lifetime allowance of three recordings of up to 20 seconds while setup is unfinished. It does not consume normal daily/monthly audio allowance, create history or audio files, or contribute to word counts, WPM, and Insights. Practice text stays inside the modal; provider costs still count toward the service spending caps.
 
 ## Run from source
@@ -273,3 +273,24 @@ Usage records retain the opaque account ID, request metadata, duration, and esti
 On launch, Sargosh shows a themed logo and a subtle loading indicator while it opens local storage and restores sign-in. The splash closes as soon as the first usable screen is rendered and the desktop window is ready to paint. There is no minimum display time, and reopening from the tray does not show it again. The splash follows the Windows light/dark theme and respects reduced-motion settings.
 
 Practice requests use dedicated desktop IPC and hosted API routes. An older desktop or backend cannot silently fall back to normal paid dictation. The server checks verified identity, unfinished onboarding, lifetime practice attempts, request pairing, recording length, and shared spending budgets. Client-supplied practice flags alone do not grant unlimited access. Usage recorded before practice isolation remains unchanged because it was not tagged as practice.
+
+## Windows beta installer
+
+The Windows x64 beta includes Electron and the local Python helper with its runtime. Users do not need Node.js, Python, or API keys. An internet connection and a microphone are required for dictation. Run `Sargosh-0.1.0-beta-Setup.exe`, open Sargosh, sign in, and complete the microphone, shortcut, and practice setup. Closing the window keeps Sargosh in the tray; use Quit Sargosh to exit.
+
+Installed account data is stored under the Windows user's application data folder, separately from development data in `.local/`. Installing the beta does not import development history or sign-in. Text delivery requires a writable input and may be restricted in elevated or protected applications. This beta has no automatic update check yet; updates require a new installer. The initial beta is unsigned, so Windows may show an unknown-publisher warning.
+
+### Build the Windows installer from source
+
+Build on Windows x64 with Node.js 22.12 or newer, npm 10.9 or newer, and 64-bit Python 3.11. Install the normal development dependencies, create `.venv`, and install the build requirements:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r helper/requirements-build.txt
+npm run make
+```
+
+Before building, set `SARGOSH_API_URL` to the hosted HTTPS backend origin, plus `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in the private project `.env`. Only these three public settings are written into the app. Deepgram, Gemini, Resend, and Supabase server keys belong on the backend and are excluded from the installer. The build rejects a private Supabase key in the public-key field.
+
+`npm run make` builds the interface and desktop coordinator, prepares public configuration, bundles the helper with PyInstaller, and uses Electron Forge and Squirrel.Windows to create the installer. Outputs are in `out/make/squirrel.windows/x64/`; the Setup executable is the file users install. Generated executables and packages are ignored by Git. Building an installer does not publish a GitHub release or deploy the backend.
+
+To inspect an unpacked application instead, use `npm run package`. Run `npm run test:bundled-helper` to check the bundled Python runtime, SQLite, UI Automation, shortcut hook, and clean shutdown without recording audio or inserting text. Installer startup events are handled before the normal app opens, so installation and removal can create or remove shortcuts without starting dictation.

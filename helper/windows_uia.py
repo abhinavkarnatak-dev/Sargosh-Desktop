@@ -22,7 +22,11 @@ class UIAutomation:
         import comtypes.client
         self.comtypes = comtypes
         comtypes.CoInitializeEx(0)  # Dedicated worker uses the multithreaded COM apartment.
-        self.types = comtypes.client.GetModule('UIAutomationCore.dll')
+        if getattr(sys, 'frozen', False):
+            from comtypes.gen import UIAutomationClient
+            self.types = UIAutomationClient
+        else:
+            self.types = comtypes.client.GetModule('UIAutomationCore.dll')
         self.uia = comtypes.client.CreateObject(self.types.CUIAutomation, interface=self.types.IUIAutomation)
         self.ignored = set(ignored_processes) | {os.getpid()}
         self.targets = {}

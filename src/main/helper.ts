@@ -1,7 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { helperCommand } from './helper-command';
 interface Pending { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
 export class Helper {
   private child?: ChildProcessWithoutNullStreams;
@@ -13,10 +12,9 @@ export class Helper {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
-  async start(root: string, dataDir: string): Promise<void> {
-    const localPython = path.join(root, '.venv', 'Scripts', 'python.exe');
-    const python = process.env.SARGOSH_PYTHON || (existsSync(localPython) ? localPython : 'python');
-    this.child = spawn(python, [path.join(root, 'helper', 'main.py'), '--data-dir', dataDir], {
+  async start(root: string, dataDir: string, executable?: string): Promise<void> {
+    const launch = helperCommand(root, dataDir, executable);
+    this.child = spawn(launch.command, launch.args, {
       windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
     });
     const fail = () => {

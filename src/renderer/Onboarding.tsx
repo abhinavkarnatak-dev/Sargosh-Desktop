@@ -1,3 +1,4 @@
+import { useMicrophones } from './useMicrophones';
 import { shortcutLabel } from '../shared/shortcut-label';
 import { useEffect, useRef, useState } from 'react';
 import { Mic, Square, X } from 'lucide-react';
@@ -14,7 +15,8 @@ const EXAMPLE = 'Hi, I am trying Sargosh. This is my first dictation.';
 export function Onboarding({ preferences, onSave }: { preferences: Preferences; onSave(update: Partial<Preferences>): Promise<void> }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [step, setStep] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState('');
-  const [editing, setEditing] = useState(false), [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [devices, setDevices] = useMicrophones();
   const audio = useRecording(), speech = useTranscription(), clean = useCleanup();
   const listening = recordingBusy(audio), processing = speech.phase === 'working' || clean.phase === 'working' || cloudBusy();
   const blocked = busy || listening || processing;
@@ -29,11 +31,6 @@ export function Onboarding({ preferences, onSave }: { preferences: Preferences; 
   useEffect(() => {
     setTutorialMode(true);
     return () => { cancelRecording(); recording.clear(); setTutorialMode(false); };
-  }, []);
-  useEffect(() => {
-    let alive = true;
-    void navigator.mediaDevices?.enumerateDevices().then(values => { if (alive) setDevices(values.filter(device => device.kind === 'audioinput')); }).catch(() => {});
-    return () => { alive = false; };
   }, []);
   useEffect(() => {
     if (step === 2 || !window.sargosh?.windowsStatus) return;

@@ -1,3 +1,4 @@
+import { OtpInput } from './OtpInput';
 import { useEffect, useRef, useState } from 'react';
 import { isEmailCode, type AuthState } from '../shared/auth';
 export function SignIn({ state }: { state: AuthState }) {
@@ -26,7 +27,7 @@ export function SignIn({ state }: { state: AuthState }) {
         else { await window.sargosh!.sendEmailCode(email.trim()); setSent(true); setResendAt(Date.now() + 60000); }
       }); }}>
         {!sent && <><label htmlFor="sign-in-email">Email</label><input id="sign-in-email" type="email" autoComplete="email" required maxLength={254} value={email} disabled={busy || sent || state.googlePending} onChange={event => setEmail(event.target.value)} /></>}
-        {sent && <><label htmlFor="sign-in-code">OTP</label><input ref={codeInput} id="sign-in-code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={code} disabled={busy || state.googlePending} onChange={event => { const value = event.target.value.replace(/[^0-9]/g,''); if (value.length > 6) { setMessage('Enter the 6-digit OTP from the latest email.'); return; } setCode(value); }} onPaste={event => { const value = event.clipboardData.getData('text').replace(/\s/g,''); event.preventDefault(); if (!isEmailCode(value)) { setMessage('Enter the 6-digit OTP from the latest email.'); return; } setMessage(''); setCode(value); }} autoFocus /><p className="inline-help">Check your spam folder if the OTP has not arrived.</p></>}
+        {sent && <><label htmlFor="sign-in-code">OTP</label><OtpInput inputRef={codeInput} id="sign-in-code" value={code} disabled={busy || state.googlePending} onChange={value => { setCode(value); setMessage(''); }} onInvalid={setMessage} /><p className="inline-help" id="sign-in-code-help">Check your spam folder if the OTP has not arrived.</p></>}
         <button className="button" type="submit" disabled={busy || state.googlePending}>{busy ? 'Please wait...' : sent ? 'Verify and sign in' : 'Send OTP'}</button>
       </form>
       {sent && <div className="sign-in-secondary"><button className="text-button" disabled={busy || state.googlePending} onClick={() => { setSent(false); setCode(''); setMessage(''); }}>Back to sign in</button><button className="text-button" disabled={busy || state.googlePending} onClick={() => void action(async () => { if (Date.now() < resendAt) throw new Error('Wait one minute before requesting another OTP.'); await window.sargosh!.sendEmailCode(email.trim()); setResendAt(Date.now() + 60000); setMessage('A new OTP has been sent.'); })}>Resend OTP</button></div>}

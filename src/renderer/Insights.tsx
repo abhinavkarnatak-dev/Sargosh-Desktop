@@ -33,7 +33,7 @@ export function Insights({ snapshot }: { snapshot: Snapshot }) {
         const words = activity.get(date) || 0;
         const level = words === 0 ? 0 : Math.min(4, Math.max(1, Math.ceil(words / maximum * 4)));
         const label = new Date(date + 'T12:00:00').toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
-        return <button type="button" key={date} style={{ animationDelay: `${Math.floor(index / 7) * 28}ms` }} className={`day-cell level-${level}${date > today ? ' future' : ''}`} aria-label={label + ': ' + words.toLocaleString() + ' words'} disabled={date > today} onMouseEnter={event => showDay(event.currentTarget, label, words)} onMouseLeave={() => setTooltip(null)} onFocus={event => showDay(event.currentTarget, label, words)} onBlur={() => setTooltip(null)} />;
+        return <button type="button" key={date} style={{ animationDelay: `${Math.floor(index / 7) * 28}ms` }} className={`day-cell level-${level}${date > today ? ' future' : ''}`} aria-label={label + ': ' + words.toLocaleString() + ' words'} data-tooltip="" disabled={date > today} onMouseEnter={event => showDay(event.currentTarget, label, words)} onMouseLeave={() => setTooltip(null)} onFocus={event => showDay(event.currentTarget, label, words)} onBlur={() => setTooltip(null)} />;
       })}</div></div></div></div>
       <div className="calendar-bottom"><span><CalendarDays size={14} /> Small moments add up.</span><div className="legend"><span>Less</span>{[0, 1, 2, 3, 4].map(level => <i className={'level-' + level} key={level} />)}<span>More</span></div></div>
     </section>

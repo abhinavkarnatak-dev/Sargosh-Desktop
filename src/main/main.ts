@@ -1,3 +1,4 @@
+import { microphoneCheck, microphoneRequest } from './microphone-permissions';
 import { createSplash } from './splash';
 import { StartupGate } from './startup';
 import { validAccountUsage } from '../shared/usage';
@@ -29,9 +30,10 @@ import { INITIAL_WINDOWS_STATE, type WindowsState } from '../shared/windows';
 import type { Preferences, RuntimeStatus } from '../shared/types';
 const root = path.resolve(__dirname, '../..');
 const dev = !app.isPackaged;
-const rendererURL = process.env.SARGOSH_RENDERER_URL;
+const rendererURL = dev ? process.env.SARGOSH_RENDERER_URL : undefined;
 if (dev) app.setPath('userData', path.join(root, '.local', 'electron'));
 app.setName('Sargosh');
+if (process.platform === 'win32') app.setAppUserModelId('com.squirrel.Sargosh.Sargosh');
 let mainWindow: BrowserWindow | undefined;
 let splashWindow: BrowserWindow | undefined;
 function closeSplash() { if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy(); splashWindow = undefined; }
@@ -54,8 +56,8 @@ let historyRetry: string | null = null;
 const finishedRecordings = new Map<string, { createdAt: string; durationMs: number; bytes: number; mimeType: string }>();
 const helper = new Helper();
 let desktopEnvironment:Record<string,string|undefined>={...process.env};
-try{desktopEnvironment={...parseEnv(readFileSync(path.join(root,'.env'),'utf8')),...process.env};}catch{}
-if(!dev){try{desktopEnvironment={...JSON.parse(readFileSync(path.join(root,'dist','desktop-config.json'),'utf8')),...process.env};}catch{}}
+if(dev){try{desktopEnvironment={...parseEnv(readFileSync(path.join(root,'.env'),'utf8')),...process.env};}catch{}}
+if(!dev){try{desktopEnvironment={...JSON.parse(readFileSync(path.join(root,'dist','desktop-config.json'),'utf8'))};}catch{}}
 if(!dev&&!desktopEnvironment.SARGOSH_API_URL)throw new Error('The installed app is missing its hosted API configuration.');
 const apiBase=apiEndpoint(desktopEnvironment.SARGOSH_API_URL??'http://127.0.0.1:4318');
 const transcriber = new DesktopTranscriber(async () => { if (!auth) throw new Error('Sign in to use cloud dictation.'); return auth.accessToken(); },apiBase);
@@ -125,12 +127,11 @@ if (ownsLock) {
     splashWindow = createSplash(path.join(root, dev ? 'src/renderer/public/brand' : 'dist/renderer/brand'), nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
     Menu.setApplicationMenu(null);
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-      const mediaTypes = (details as { mediaTypes?: string[] }).mediaTypes || [];
-      callback(trustedURL(contents.getURL()) && permission === 'media' && mediaTypes.length > 0 && mediaTypes.every(type => type === 'audio'));
+      callback(microphoneRequest(contents.getURL(), permission, details, trustedURL));
     });
-    session.defaultSession.setPermissionCheckHandler((contents, permission, origin) => permission === 'media' && Boolean(contents) && trustedURL(contents!.getURL()) && trustedURL(origin));
+    session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) => microphoneCheck(contents?.getURL(), permission, details, trustedURL));
     const dataDirectory = dev ? path.join(root, '.local', 'development') : app.getPath('userData');
-    try { await helper.start(root, dataDirectory); } catch { console.error('Python helper did not start. Check your Python installation.'); }
+    try { await helper.start(root, dataDirectory, dev ? undefined : path.join(process.resourcesPath, 'sargosh-helper', 'sargosh-helper.exe')); } catch { throw new Error('The local Windows helper could not start. Restart or reinstall Sargosh.'); }
     history = new LocalHistory(path.join(dataDirectory, 'recordings'), helper, () => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sargosh:history-changed');
     });

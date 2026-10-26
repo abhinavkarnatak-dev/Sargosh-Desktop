@@ -1,8 +1,9 @@
+import { useMicrophones } from './useMicrophones';
 import { shortcutLabel } from '../shared/shortcut-label';
 import { AccountPanel } from './AccountPanel';
 import { useModalDialog } from './modal';
 import { ThemedSelect } from './ThemedSelect';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { ChevronRight, Info, Monitor, Moon, Settings, Sun, User, X } from 'lucide-react';
 import type { Preferences, Theme } from '../shared/types';
 import { STT_LANGUAGES, isSpeechLanguage } from '../shared/transcription';
@@ -15,7 +16,7 @@ export function SettingsDialog({ preferences, onSave, onClose }: { preferences: 
   const speech = useTranscription();
   const clean = useCleanup();
   const [tab, setTab] = useState<'general' | 'account'>('general');
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [devices, setDevices] = useMicrophones();
   const [details, setDetails] = useState<'shortcuts' | 'languages' | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const outsidePress = useRef(false);
@@ -24,9 +25,6 @@ export function SettingsDialog({ preferences, onSave, onClose }: { preferences: 
     return x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom;
   }
   useModalDialog(dialog);
-  useEffect(() => {
-    void navigator.mediaDevices?.enumerateDevices().then(items => setDevices(items.filter(item => item.kind === 'audioinput'))).catch(() => {});
-  }, []);
   return <dialog ref={dialog} className="settings-dialog" onCancel={event => { event.preventDefault(); onClose(); }} aria-labelledby="settings-title" onPointerDown={event => {
     outsidePress.current = event.target === event.currentTarget && outside(event.currentTarget, event.clientX, event.clientY);
   }} onClick={event => {
