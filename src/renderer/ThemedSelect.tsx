@@ -1,8 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 interface Option { value: string; label: string; icon?: ReactNode }
-interface Props { id?: string; label?: string; value: string; options: readonly Option[]; disabled?: boolean; placeholder?: string; compact?: boolean; triggerIcon?: ReactNode; onChange(value: string): void }
-export function ThemedSelect({ id, label, value, options, disabled = false, placeholder = 'Choose an option', compact = false, triggerIcon, onChange }: Props) {
+interface Props { id?: string; label?: string; value: string; options: readonly Option[]; disabled?: boolean; placeholder?: string; compact?: boolean; tooltip?: string; triggerIcon?: ReactNode; onChange(value: string): void }
+export function ThemedSelect({ id, label, value, options, disabled = false, placeholder = 'Choose an option', compact = false, tooltip, triggerIcon, onChange }: Props) {
   const generatedId = useId(); const controlId = id ?? generatedId; const listId = controlId + '-options';
   const container = useRef<HTMLDivElement>(null); const trigger = useRef<HTMLButtonElement>(null); const menu = useRef<HTMLDivElement>(null);
   const search = useRef({ text: '', time: 0 });
@@ -62,11 +62,11 @@ export function ThemedSelect({ id, label, value, options, disabled = false, plac
     }
   }
   return <div className={compact ? "themed-select compact" : "themed-select"} ref={container} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false); }}>
-    <button type="button" ref={trigger} id={controlId} className="themed-select-trigger" title={compact ? options[selected]?.label : undefined} role="combobox" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined} aria-activedescendant={open ? optionId(active) : undefined} disabled={disabled || !options.length} onClick={() => open ? setOpen(false) : show()} onKeyDown={keyDown}>
+    <button type="button" ref={trigger} id={controlId} className="themed-select-trigger" data-tooltip={open ? '' : tooltip ?? (compact ? options[selected]?.label : undefined)} data-tooltip-placement="bottom" role="combobox" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined} aria-activedescendant={open ? optionId(active) : undefined} disabled={disabled || !options.length} onClick={() => open ? setOpen(false) : show()} onKeyDown={keyDown}>
       {compact ? triggerIcon : <><span>{options[selected]?.label ?? placeholder}</span><ChevronDown size={14} aria-hidden="true" /></>}
     </button>
     {open && <div ref={menu} id={listId} role="listbox" aria-label={label ?? 'Options'} className="themed-select-menu" popover="manual">
-      {options.map((option, index) => <div id={optionId(index)} key={option.value} role="option" aria-selected={option.value === value} className={'themed-select-option' + (index === active ? ' active' : '')} title={option.label} onMouseMove={() => setActive(index)} onPointerDown={event => event.preventDefault()} onClick={() => choose(index)}>
+      {options.map((option, index) => <div id={optionId(index)} key={option.value} role="option" aria-selected={option.value === value} className={'themed-select-option' + (index === active ? ' active' : '')} data-tooltip={option.label} onMouseMove={() => setActive(index)} onPointerDown={event => event.preventDefault()} onClick={() => choose(index)}>
         {option.icon}<span>{option.label}</span>{option.value === value && <Check size={14} aria-hidden="true" />}
       </div>)}
     </div>}

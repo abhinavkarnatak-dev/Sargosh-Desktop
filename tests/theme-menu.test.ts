@@ -17,10 +17,10 @@ async function pick(label: string) {
   await act(async () => (option as HTMLElement).click());
 }
 it('uses the saved theme and updates it through Light, Dark, and System selections', async () => {
-  await render(); expect(host.querySelector('[role="combobox"]')?.getAttribute('title')).toBe('System');
+  await render(); expect(host.querySelector('[role="combobox"]')?.getAttribute('data-tooltip')).toBe('Theme');
   for (const [label, value] of [['Dark', 'dark'], ['Light', 'light'], ['System', 'system']]) {
     await pick(label); expect(saved).toHaveBeenLastCalledWith(value);
-    expect(host.querySelector('[role="combobox"]')?.getAttribute('title')).toBe(label);
+    expect(host.querySelector('[role="combobox"]')?.getAttribute('aria-label')).toBe('Change theme, current theme: ' + value);
     expect(host.querySelector('[role="listbox"]')).toBeNull();
   }
 });

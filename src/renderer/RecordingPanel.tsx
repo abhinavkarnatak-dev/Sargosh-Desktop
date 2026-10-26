@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../shared/shortcut-label';
 import { useSavedHistory } from './audio/history';
 import { ThemedSelect } from './ThemedSelect';
 import { useEffect, useState } from 'react';
@@ -56,7 +57,7 @@ export function RecordingPanel({ preferences }: { preferences: Preferences }) {
       {busy && <><button className="button secondary" disabled={state.phase === 'finishing'} onClick={() => void finishRecording()}><Square size={14} />Finish recording</button><button className="button secondary" onClick={cancelRecording}><X size={14} />Cancel recording</button></>}
       {window.sargosh && <button className="button secondary" disabled={processing || working} onClick={() => void toggle()}>{working ? 'Working...' : armed ? 'Disable recording shortcuts' : 'Enable recording shortcuts'}</button>}
     </div>
-    {window.sargosh ? <p className="inline-help">{armed ? 'Shortcuts ready: ' + native.shortcut + '. Hold and release, or double-tap to start and double-tap again to finish.' : 'Enable recording shortcuts to use this while Sargosh is in the background.'}</p> : <p className="inline-help">Browser preview supports these buttons. Global shortcuts and the floating control need the Electron app.</p>}
+    {window.sargosh ? <p className="inline-help">{armed ? 'Shortcuts ready: ' + shortcutLabel(native.shortcut) + '. Hold and release, or double-tap to start and double-tap again to finish.' : 'Enable recording shortcuts to use this while Sargosh is in the background.'}</p> : <p className="inline-help">Browser preview supports these buttons. Global shortcuts and the floating control need the Electron app.</p>}
     <div className="transcription-options">
       <label htmlFor="transcription-language">Speech language</label>
       <ThemedSelect id="transcription-language" value={speech.language} disabled={processing} options={STT_LANGUAGES} onChange={value => { if (isSpeechLanguage(value)) transcription.configure({ language: value }); }} />

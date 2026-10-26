@@ -27,7 +27,7 @@ it('automatically saves only after the full combination is released and resumes 
 });
 it('rejects unsupported keys without saving them', async () => {
   await render(); await choose(); await key('keydown', 'a', 'KeyA'); await key('keyup', 'a', 'KeyA');
-  expect(persist).not.toHaveBeenCalled(); expect(host.textContent).toContain('Use Control, Alt, or Win');
+  expect(persist).not.toHaveBeenCalled(); expect(host.textContent).toContain('Use Ctrl, Alt, or Win');
 });
 it('shows a save failure and allows cancel to restore the original shortcut', async () => {
   await render(); await choose(); persist.mockRejectedValueOnce(new Error('Shortcut could not be saved.'));

@@ -24,7 +24,7 @@ export function Insights({ snapshot }: { snapshot: Snapshot }) {
     { label: 'RECORDINGS', value: snapshot.recordingCount, detail: 'Successful dictation sessions', Icon: FileAudio }
   ];
   return <>
-    <div className="page-heading"><div><p className="eyebrow">INSIGHTS</p><h1>A little progress. Every day.</h1><p className="subtitle">A quiet look at how you use your voice.</p></div><span className="outline-tag">On this computer</span></div>
+    <div className="page-heading"><div><p className="eyebrow">INSIGHTS</p><h1>A little progress. Every day.</h1><p className="subtitle">A quiet look at how you use your voice.</p></div></div>
     <div className="insight-cards">{stats.map(({ label, value, detail, Icon }) => <section className="metric-card" key={label}><Icon size={20} strokeWidth={1.5} /><strong><RollingNumber value={value} /></strong><span className="eyebrow">{label}</span><p>{detail}</p></section>)}</div>
     <section className="activity-card" aria-labelledby="activity-heading">
       <div className="activity-title"><div><span className="eyebrow">KEEP SHOWING UP</span><h2 id="activity-heading">{streak.current} day streak</h2></div><span className="longest">Longest streak <strong>{streak.longest} days</strong></span></div>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { Tooltips } from './Tooltips';
 import { App } from './App';
 import { Overlay } from './Overlay';
 import './styles.css';
@@ -7,4 +8,4 @@ import { initializeRecording } from './audio/runtime';
 const overlay = window.location.hash === '#overlay';
 if (!overlay) initializeRecording();
 document.documentElement.dataset.surface = overlay ? 'overlay' : 'app';
-createRoot(document.getElementById('root')!).render(<React.StrictMode>{overlay ? <Overlay /> : <App />}</React.StrictMode>);
+createRoot(document.getElementById('root')!).render(<React.StrictMode>{overlay ? <Overlay /> : <App />}<Tooltips /></React.StrictMode>);

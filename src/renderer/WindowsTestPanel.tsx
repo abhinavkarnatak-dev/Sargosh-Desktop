@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../shared/shortcut-label';
 import { useEffect, useState } from 'react';
 import { Keyboard, Square, Target, X } from 'lucide-react';
 import { INITIAL_WINDOWS_STATE, type WindowsState } from '../shared/windows';
@@ -29,12 +30,12 @@ export function WindowsTestPanel({ shortcut, onShortcut }: { shortcut: string; o
     <div className="windows-test-heading"><Keyboard size={17} /><div><h3 id="windows-test-title">Windows input test</h3><p>Development only. No audio is recorded and no AI service is called.</p></div></div>
     {!window.sargosh ? <p className="inline-help">Open the Electron desktop app to test global shortcuts and text insertion. These controls cannot run in a browser preview.</p> : <>
       <label className="shortcut-label" htmlFor="shortcut-capture">Dictation shortcut</label>
-      <input id="shortcut-capture" className="shortcut-input" value={draft} readOnly disabled={state.enabled || busy} aria-describedby="shortcut-help" onKeyDown={event => {
+      <input id="shortcut-capture" className="shortcut-input" value={shortcutLabel(draft)} readOnly disabled={state.enabled || busy} aria-describedby="shortcut-help" onKeyDown={event => {
         event.preventDefault();
         if (event.repeat || ['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return;
         const key = event.code === 'Space' ? 'Space' : /^Key[A-Z]$/.test(event.code) ? event.code.slice(3) : /^F([1-9]|1[0-9]|2[0-4])$/.test(event.code) ? event.code : null;
         const modifiers = [event.ctrlKey && 'Control', event.altKey && 'Alt', event.shiftKey && 'Shift', event.metaKey && 'Win'].filter(Boolean);
-        if (!key || !modifiers.some(value => ['Control', 'Alt', 'Win'].includes(String(value)))) { setError('Use Control, Alt, or Win with a letter, function key, or Space.'); return; }
+        if (!key || !modifiers.some(value => ['Control', 'Alt', 'Win'].includes(String(value)))) { setError('Use Ctrl, Alt, or Win with a letter, F1-F24, or Space.'); return; }
         setError(''); setDraft([...modifiers, key].join('+'));
       }} />
       <p id="shortcut-help" className="inline-help">Click the field and press a combination. Hold it to test push-to-talk, or double-tap it to start and finish hands-free.</p>

@@ -19,7 +19,7 @@ it('walks through microphone, saved shortcut, and real-practice controls, persis
   await act(async()=>root.render(createElement(Harness)));expect(host.querySelector('dialog')!.open).toBe(true);expect(host.textContent).toContain('Microphone test available');expect(fake.complete).not.toHaveBeenCalled();
   const cancel=new Event('cancel',{cancelable:true});host.querySelector('dialog')!.dispatchEvent(cancel);expect(cancel.defaultPrevented).toBe(true);
   await click('Continue');await click('Choose custom shortcut');expect(fake.complete).not.toHaveBeenCalled();
-  await click('Continue');expect(fake.activate).toHaveBeenCalledWith('Control+Alt+K');expect(host.textContent).toContain('Control + Alt + K');
+  await click('Continue');expect(fake.activate).toHaveBeenCalledWith('Control+Alt+K');expect(host.textContent).toContain('Ctrl + Alt + K');
   await click('Start recording');expect(fake.start).toHaveBeenCalledOnce();
   fake.clean={phase:'completed',sessionId:'practice',result:{text:'Hi, I am trying Sargosh.'}};
   await act(async()=>root.render(createElement(Harness)));expect(host.querySelector('textarea')!.value).toBe('Hi, I am trying Sargosh.');

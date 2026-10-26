@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../shared/shortcut-label';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { cloudBusy, recording } from './audio/runtime';
@@ -33,7 +34,7 @@ export function ShortcutEditor({ shortcut, onSave, onEditingChange }: { shortcut
     const modifiers = [event.ctrlKey && 'Control', event.altKey && 'Alt', event.shiftKey && 'Shift', event.metaKey && 'Win'].filter(Boolean);
     const value = [...modifiers, key].join('+');
     if (!key || !modifiers.some(value => ['Control', 'Alt', 'Win'].includes(String(value))) || ['Alt+F4', 'Win+L'].includes(value)) {
-      setMessage('Use Control, Alt, or Win with a letter, function key, or Space. Avoid Windows system shortcuts.'); return;
+      setMessage('Use Ctrl, Alt, or Win with a letter, F1-F24, or Space. Avoid Windows system shortcuts.'); return;
     }
     candidate.current = value; setDraft(value); setMessage('Release the keys to save.');
   }
@@ -47,7 +48,7 @@ export function ShortcutEditor({ shortcut, onSave, onEditingChange }: { shortcut
   }
   return <div className="inline-detail shortcut-editor"><div>
     <label className="shortcut-label" htmlFor="dictation-shortcut">Dictation shortcut</label>
-    <div className="shortcut-editor-controls"><input ref={input} id="dictation-shortcut" className="shortcut-input" value={draft} readOnly disabled={!editing || busy} aria-describedby="dictation-shortcut-help" onKeyDown={capture} onKeyUp={event => void release(event)} onBlur={() => { candidate.current = null; }} />
+    <div className="shortcut-editor-controls"><input ref={input} id="dictation-shortcut" className="shortcut-input" value={shortcutLabel(draft)} readOnly disabled={!editing || busy} aria-describedby="dictation-shortcut-help" onKeyDown={capture} onKeyUp={event => void release(event)} onBlur={() => { candidate.current = null; }} />
       <button className="button secondary" disabled={busy} onClick={() => void change(editing)}>{busy ? 'Please wait...' : editing ? 'Cancel' : 'Change shortcut'}</button></div>
     <p id="dictation-shortcut-help" className="inline-help">{editing ? 'Press a combination, then release all keys. It saves automatically. Recording shortcuts are paused while you choose.' : 'The same shortcut works for hold-to-talk and double-tap hands-free.'}</p>
     {message && <p role="status" className="inline-help">{message}</p>}

@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../shared/shortcut-label';
 import { useEffect, useRef, useState } from 'react';
 import { Mic, Square, X } from 'lucide-react';
 import { useModalDialog } from './modal';
@@ -54,14 +55,14 @@ export function Onboarding({ preferences, onSave }: { preferences: Preferences; 
   }
   const result = clean.phase === 'completed' && clean.sessionId === speech.sessionId ? clean.result?.text : '';
   return <dialog ref={dialog} className="onboarding-dialog" aria-labelledby="onboarding-title" onCancel={event => event.preventDefault()}>
-    <div className="onboarding-header"><img className="brand-dark" src="./brand/logo-dark.png" alt="Sargosh" /><img className="brand-light" src="./brand/logo-light.png" alt="Sargosh" /><span>WELCOME TO SARGOSH</span></div>
+    <div className="onboarding-header"><img className="brand-dark" src="./brand/logo-dark.png" alt="Sargosh" /><img className="brand-light" src="./brand/logo-light.png" alt="Sargosh" /><span>LET’S GET YOU SET UP</span></div>
     <ol className="onboarding-steps" aria-label="Setup progress">{['Microphone', 'Shortcut', 'Try dictation'].map((label, index) => <li key={label} aria-current={step === index ? 'step' : undefined} className={index <= step ? 'reached' : ''}><span>{index + 1}</span>{label}</li>)}</ol>
     <div className="onboarding-body" key={step}>
       <h2 id="onboarding-title">{['Let us hear you.', 'Choose your shortcut.', 'Your first words with Sargosh.'][step]}</h2>
       {step === 0 ? <><p className="subtitle">Choose a microphone, then speak to check the level. This test stays on your computer.</p><ThemedSelect label="Microphone" value={preferences.microphoneId} placeholder="Unavailable microphone" options={[{value:'default',label:'Windows default'}, ...devices.filter(device => device.deviceId && !['default','communications'].includes(device.deviceId)).map((device,index) => ({value:device.deviceId,label:device.label || 'Microphone '+(index+1)}))]} onChange={value => void onSave({microphoneId:value})}/><MicrophoneTest microphoneId={preferences.microphoneId} onDevices={setDevices}/></> : step === 1 ? <><p className="subtitle">Keep the suggested shortcut or choose one that feels comfortable. You can change it later in Settings.</p><ShortcutEditor shortcut={preferences.shortcut} onSave={value => onSave({shortcut:value})} onEditingChange={setEditing}/><p className="inline-help">Hold to talk and release to finish. Double-tap to start hands-free, then double-tap again to finish.</p></> : <>
         <p className="subtitle">Try saying this, or use your own words:</p><blockquote className="onboarding-example">{EXAMPLE}</blockquote>
         <ThemedSelect label="Speech language" value={speech.language} options={STT_LANGUAGES} disabled={blocked} onChange={value => { if(isSpeechLanguage(value)) transcription.configure({language:value}); }}/>
-        <p className="inline-help">Hold {preferences.shortcut.split('+').join(' + ')} and speak, or use the button below. Your practice text stays in this modal instead of being typed into another app.</p>
+        <p className="inline-help">Hold {shortcutLabel(preferences.shortcut)} and speak, or use the button below. Your practice text stays in this modal instead of being typed into another app.</p>
         <div className="onboarding-recording-actions">{listening ? <><button className="button" disabled={audio.phase === 'finishing'} onClick={() => void finishRecording()}><Square size={14}/>Finish</button><button className="button secondary" onClick={cancelRecording}><X size={14}/>Cancel</button></> : <button className="button" disabled={blocked} onClick={() => { setError(''); void startRecording().catch(() => setError('Could not start recording. Check your microphone and try again.')); }}><Mic size={15}/>{result ? 'Try again' : 'Start recording'}</button>}</div>
         {listening && <div className="meter" role="meter" aria-label="Recording microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={audio.level}><span style={{width:audio.level+'%'}}/></div>}
         {processing && !listening && <p className="inline-help" role="status">Preparing your text...</p>}

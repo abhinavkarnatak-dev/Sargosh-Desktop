@@ -8,8 +8,9 @@ The source provides a Windows desktop workspace with light and dark themes, a fl
 
 - The top bar holds the sidebar toggle, a Light/Dark/System theme menu, and native Windows minimize, maximize, and close controls. Its empty area can be dragged to move the window, and its colors follow the app theme. The theme button uses the native window-control bounds to keep a small gap beside Minimize at different display scales.
 - The rounded page frame stays fixed while its content scrolls. Scrollbars are hidden; mouse-wheel, touchpad, and keyboard scrolling remain available.
+- Icon hover labels use custom tooltips that follow the app theme, appear on keyboard focus, and dismiss on Escape or click.
 - The sidebar expands smoothly with fading labels. Its logo and navigation icons stay aligned, with Settings anchored at the bottom.
-- **Dictation** shows saved transcripts and original recordings, grouped by day.
+- **Dictation** places the saved shortcut and usage instructions in one introductory area, with compact word and speaking-pace statistics beside it. Saved transcripts and original recordings follow below, grouped by day.
 - **Insights** shows total words, recording count, average words per minute, and daily activity. A day's tooltip contains only its date and word count. On opening Insights, the activity grid reveals smoothly from left to right, one week column at a time. The animation respects the system's reduced-motion setting.
 - **Settings** contains theme and microphone preferences and a microphone test. While Settings is open, the background stays still and cannot be interacted with. Click outside the dialog, press Escape, or use its close button to return.
 - The tray icon reopens Sargosh. Closing the main window hides it; choose **Quit Sargosh** from the tray menu to exit.
@@ -70,7 +71,7 @@ The agreed dictation design is record-then-upload, with Deepgram recognition and
 
 ## Record and play local audio
 
-Recording shortcuts activate automatically when the signed-in workspace opens. Click a writable textbox in another app, hold your configured shortcut, speak, and release to finish. Double-tap to start hands-free and double-tap again to finish. The floating control also offers recording controls. The Dictation page explains the current shortcut and provides a retry if shortcuts become unavailable. Customize the shortcut and microphone in Settings.
+Recording shortcuts activate automatically when the signed-in workspace opens. Click a writable textbox in another app, hold your configured shortcut, speak, and release to finish. Double-tap to start hands-free and double-tap again to finish. The floating control also offers recording controls. The Dictation page explains the current shortcut and provides a retry if shortcuts become unavailable. Customize the shortcut and microphone in Settings. Shortcut labels use compact key names such as Ctrl, Alt, and Win throughout the interface; the overlay action is labeled Dictate.
 
 The microphone is opened only for a microphone test or recording and is stopped on finish or cancellation. The microphone test stays local. Finishing a dictation collects the final audio chunk, saves the recording locally, and automatically transcribes and cleans it before text delivery. There are no manual transcription or cleanup switches on the dashboard. Play, copy, retry, extract, or delete saved dictations from history.
 

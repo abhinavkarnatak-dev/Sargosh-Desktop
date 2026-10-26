@@ -65,7 +65,7 @@ function Workspace({ account }: { account: AccountUser | null }) {
   useEffect(() => { setRecordingPreferences(snapshot.preferences); }, [snapshot.preferences]);
   const collapsed = snapshot.preferences.collapsed;
   return <div className="app-frame"><StartupReady ready={snapshotReady} />
-    <header className="desktop-titlebar" aria-label="Window title bar"><button className="icon-button sidebar-toggle" aria-expanded={!collapsed} aria-controls="sargosh-sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => void savePreferences({ collapsed: !collapsed })}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button><ThemeMenu theme={snapshot.preferences.theme} onChange={theme => void savePreferences({ theme })} /></header>
+    <header className="desktop-titlebar" aria-label="Window title bar"><button className="icon-button sidebar-toggle" data-tooltip-placement="bottom" aria-expanded={!collapsed} aria-controls="sargosh-sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => void savePreferences({ collapsed: !collapsed })}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button><ThemeMenu theme={snapshot.preferences.theme} onChange={theme => void savePreferences({ theme })} /></header>
     <div className={collapsed ? 'app-shell collapsed' : 'app-shell'}>
     <aside className="sidebar" id="sargosh-sidebar">
       <div className="sidebar-top">
@@ -75,13 +75,13 @@ function Workspace({ account }: { account: AccountUser | null }) {
           <span className="sidebar-label">Sargosh<span className="brand-caption">A little less typing.</span></span>
         </a>
         <nav aria-label="Main navigation">
-          <button title="Dictation" className={page === 'dictation' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('dictation')}><Mic size={19} /><span className="sidebar-label">Dictation</span></button>
-          <button title="Insights" className={page === 'insights' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('insights')}><BarChart3 size={19} /><span className="sidebar-label">Insights</span></button>
-          <button title="Usage" aria-current={page === 'usage' ? 'page' : undefined} className={page === 'usage' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('usage')}><Gauge size={19} /><span className="sidebar-label">Usage</span></button>
+          <button aria-label="Dictation" data-tooltip={collapsed ? 'Dictation' : ''} data-tooltip-placement="right" className={page === 'dictation' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('dictation')}><Mic size={19} /><span className="sidebar-label">Dictation</span></button>
+          <button aria-label="Insights" data-tooltip={collapsed ? 'Insights' : ''} data-tooltip-placement="right" className={page === 'insights' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('insights')}><BarChart3 size={19} /><span className="sidebar-label">Insights</span></button>
+          <button aria-label="Usage" data-tooltip={collapsed ? 'Usage' : ''} data-tooltip-placement="right" aria-current={page === 'usage' ? 'page' : undefined} className={page === 'usage' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('usage')}><Gauge size={19} /><span className="sidebar-label">Usage</span></button>
         </nav>
       </div>
       <div className="sidebar-bottom">
-        <button title="Settings" className="nav-item" onClick={() => setSettings(true)}><Settings size={19} /><span className="sidebar-label">Settings</span></button>
+        <button aria-label="Settings" data-tooltip={collapsed ? 'Settings' : ''} data-tooltip-placement="right" className="nav-item" onClick={() => setSettings(true)}><Settings size={19} /><span className="sidebar-label">Settings</span></button>
       </div>
     </aside>
     <main className="main-surface">
@@ -89,11 +89,14 @@ function Workspace({ account }: { account: AccountUser | null }) {
       <div className="page-content">
         {page === 'dictation' ? <>
           <div className="page-heading"><div><p className="eyebrow">DICTATION</p><h1>{account?.firstName ? 'Welcome back, ' + account.firstName : 'Welcome to Sargosh'}</h1><p className="subtitle">Speak naturally. Make room for your thoughts.</p></div></div>
-          <div className="dictation-stats">
-            <section className="dictation-stat"><Mic size={19} strokeWidth={1.5} /><div><span className="stat-number"><RollingNumber value={snapshot.totalWords} /></span><span className="stat-label">total words dictated</span></div></section>
-            <section className="dictation-stat"><BarChart3 size={19} strokeWidth={1.5} /><div><span className="stat-number"><RollingNumber value={wordsPerMinute(snapshot.totalWords, snapshot.totalDurationMs)} /><small>wpm</small></span><span className="stat-label">average dictation speed</span></div></section>
+          <div className="dictation-overview">
+            <DictationGuide preferences={snapshot.preferences} enabled={snapshotReady && !account?.onboardingRequired} />
+            <aside className="dictation-summary" aria-label="Dictation statistics">
+              <p className="eyebrow">YOUR ACTIVITY</p>
+              <div className="dictation-summary-metric"><span className="stat-number"><RollingNumber value={snapshot.totalWords} /></span><span className="stat-label">words dictated</span></div>
+              <div className="dictation-summary-metric"><span className="stat-number"><RollingNumber value={wordsPerMinute(snapshot.totalWords, snapshot.totalDurationMs)} /><small>wpm</small></span><span className="stat-label">average speaking pace</span></div>
+            </aside>
           </div>
-          <DictationGuide preferences={snapshot.preferences} enabled={snapshotReady && !account?.onboardingRequired} />
           <HistoryList onNotice={setNotice} />
         </> : page === 'insights' ? <Insights snapshot={snapshot} /> : <>
           <div className="page-heading"><div><p className="eyebrow">USAGE</p><h1>Your dictation allowance</h1><p className="subtitle">See how much time you have left and when it resets.</p></div></div>

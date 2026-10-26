@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../shared/shortcut-label';
 import { recordingNotice, type OverlayNotice } from '../shared/overlay-notice';
 import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, Copy, GripVertical, LoaderCircle, Mic, X } from 'lucide-react';
@@ -68,17 +69,17 @@ export function Overlay() {
         <span className="overlay-wave" aria-hidden="true">{[0,1,2,3,4,5,6].map(index => <i key={index} style={{ height: '3px' }} />)}</span>
         <LoaderCircle className="overlay-spinner" size={16} aria-hidden="true" />
       </div> : audioActive ? <>
-        <button className="overlay-mic" aria-label="Cancel recording" title="Cancel" onClick={() => void recordingAction('cancel')}><X size={15} /></button>
-        {audio.phase === 'recording' ? <span className="overlay-wave" role="img" aria-label={audio.quiet ? 'No microphone activity' : 'Listening'} title={audio.quiet ? 'No microphone activity. Check your mic.' : 'Listening - ' + state.shortcut}>{[.35,.65,.85,1,.85,.65,.35].map((weight, index) => <i key={index} style={{ height: Math.max(3, audio.level * .24 * weight) + 'px' }} />)}</span> : <span className="overlay-recording-status">{audio.phase === 'opening' ? 'Starting...' : 'Finishing...'}</span>}
-        {audio.mode !== 'hold' && <button className="overlay-mic" aria-label="Finish recording" title={'Press ' + state.shortcut + ' to finish recording'} disabled={audio.phase === 'finishing'} onClick={() => void recordingAction('finish')}><Check size={15} /></button>}
+        <button className="overlay-mic" aria-label="Cancel recording" data-tooltip="Cancel" onClick={() => void recordingAction('cancel')}><X size={15} /></button>
+        {audio.phase === 'recording' ? <span className="overlay-wave" role="img" aria-label={audio.quiet ? 'No microphone activity' : 'Listening'} data-tooltip={audio.quiet ? 'No microphone activity. Check your mic.' : audio.mode === 'hands-free' ? 'Press ' + shortcutLabel(state.shortcut) + ' to finish and paste' : 'Listening'}>{[.35,.65,.85,1,.85,.65,.35].map((weight, index) => <i key={index} style={{ height: Math.max(3, audio.level * .24 * weight) + 'px' }} />)}</span> : <span className="overlay-recording-status">{audio.phase === 'opening' ? 'Starting...' : 'Finishing...'}</span>}
+        {audio.mode !== 'hold' && <button className="overlay-mic" aria-label="Finish recording" data-tooltip="Finish and paste" disabled={audio.phase === 'finishing'} onClick={() => void recordingAction('finish')}><Check size={15} /></button>}
       </> : active && state.purpose === 'recording' ? <span className="overlay-recording-status">Starting...</span> : active ? <>
-        <button className="overlay-mic" aria-label="Cancel input test session" title="Cancel" onClick={() => void action('cancel')}><X size={15} /></button>
-        <span className="overlay-test-label" title="Input tracking only. No audio is recorded.">{state.phase === 'pending' ? 'Starting test' : state.mode === 'hold' ? 'Hold test' : 'Input test'}</span>
-        {state.mode === 'hands-free' && <button className="overlay-mic" aria-label="Finish input test session" title="Finish input test" onClick={() => void action('finish')}><Check size={15} /></button>}
+        <button className="overlay-mic" aria-label="Cancel input test session" data-tooltip="Cancel" onClick={() => void action('cancel')}><X size={15} /></button>
+        <span className="overlay-test-label" data-tooltip="Input tracking only. No audio is recorded.">{state.phase === 'pending' ? 'Starting test' : state.mode === 'hold' ? 'Hold test' : 'Input test'}</span>
+        {state.mode === 'hands-free' && <button className="overlay-mic" aria-label="Finish input test session" data-tooltip="Finish input test" onClick={() => void action('finish')}><Check size={15} /></button>}
       </> : expanded ? <>
         <button className="overlay-grip" aria-label="Move dictation control" onPointerDown={event => { drag.current = { x: event.screenX, y: event.screenY }; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={event => { if (!drag.current) return; const dx = event.screenX - drag.current.x; const dy = event.screenY - drag.current.y; drag.current = { x: event.screenX, y: event.screenY }; void window.sargosh?.moveOverlay(dx, dy); }} onPointerUp={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }}><GripVertical size={15} /></button>
-        <button className="overlay-mic" aria-label={state.enabled ? state.purpose === 'recording' ? 'Start hands-free recording' : 'Start hands-free input test' : 'Open Sargosh to set up dictation'} title={state.enabled ? state.purpose === 'recording' ? 'Start recording' : 'Start input test' : 'Set up dictation in Sargosh'} onClick={() => state.enabled ? void action('start-hands-free') : void window.sargosh?.openMain()}><Mic size={19} /></button>
-        <span className="overlay-tooltip">{state.enabled ? (state.purpose === 'recording' ? 'Record - ' : 'Input test - ') + state.shortcut : 'Set up dictation in Sargosh'}</span>
+        <button className="overlay-mic" aria-label={state.enabled ? state.purpose === 'recording' ? 'Start hands-free recording' : 'Start hands-free input test' : 'Open Sargosh to set up dictation'} data-tooltip="" onClick={() => state.enabled ? void action('start-hands-free') : void window.sargosh?.openMain()}><Mic size={19} /></button>
+        <span className="overlay-tooltip">{state.enabled ? (state.purpose === 'recording' ? 'Dictate - ' : 'Input test - ') + shortcutLabel(state.shortcut) : 'Set up dictation in Sargosh'}</span>
       </> : <span className="idle-line" />}
     </div>
   </div>;
@@ -102,7 +103,7 @@ function NoticeCard({ notice, onDismiss }: { notice: OverlayNotice; onDismiss: (
     } catch { setCopyError('Could not copy. Open Sargosh to recover your text.'); }
   }
   return <section className="overlay-notice" role={notice.kind === 'info' ? 'status' : 'alert'} aria-label={notice.title}>
-    <header><span className={'overlay-notice-icon ' + notice.kind}>{notice.kind === 'info' ? <Check size={16} /> : <AlertCircle size={16} />}</span><strong>{notice.title}</strong><button className="overlay-notice-close" aria-label="Dismiss notification" onClick={onDismiss}><X size={17} /></button></header>
+    <header>{notice.kind !== 'info' && <span className={'overlay-notice-icon ' + notice.kind}><AlertCircle size={16} /></span>}<strong>{notice.title}</strong><button className="overlay-notice-close" aria-label="Dismiss notification" onClick={onDismiss}><X size={17} /></button></header>
     <p>{notice.message}</p>
     {notice.text && <div className="overlay-recovery-text" tabIndex={0} aria-label="Recovered dictation">{notice.text}</div>}
     <div className="overlay-notice-actions">

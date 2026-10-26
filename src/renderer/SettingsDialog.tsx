@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../shared/shortcut-label';
 import { AccountPanel } from './AccountPanel';
 import { useModalDialog } from './modal';
 import { ThemedSelect } from './ThemedSelect';
@@ -38,7 +39,7 @@ export function SettingsDialog({ preferences, onSave, onClose }: { preferences: 
       {tab === 'general' ? <>
         <p className="eyebrow">MAKE IT YOURS</p><h2>General</h2><p className="subtitle">A few preferences for a more comfortable flow.</p>
         <div className="settings-card">
-          <div className="setting-row"><div><strong>Shortcuts</strong><p>{preferences.shortcut.split('+').join(' + ')}</p></div><button className="button secondary" onClick={() => setDetails(details === 'shortcuts' ? null : 'shortcuts')}>View<ChevronRight size={14} /></button></div>
+          <div className="setting-row"><div><strong>Shortcuts</strong><p>{shortcutLabel(preferences.shortcut)}</p></div><button className="button secondary" onClick={() => setDetails(details === 'shortcuts' ? null : 'shortcuts')}>View<ChevronRight size={14} /></button></div>
           {details === 'shortcuts' && <ShortcutEditor shortcut={preferences.shortcut} onSave={value => onSave({ shortcut: value })} />}
           <div className="setting-row"><div><strong>Microphone</strong><p>Choose the input Sargosh should use.</p></div><ThemedSelect label="Microphone" value={preferences.microphoneId} placeholder="Unavailable microphone" options={[{ value: 'default', label: 'Windows default' }, ...devices.filter(device => device.deviceId !== 'default' && device.deviceId !== 'communications' && device.deviceId).map((device, index) => ({ value: device.deviceId, label: device.label || 'Microphone ' + (index + 1) }))]} onChange={value => void onSave({ microphoneId: value })} /></div>
           <div className="setting-row"><div><strong>My languages</strong><p>Languages used for speech recognition.</p></div><button className="button secondary" onClick={() => setDetails(details === 'languages' ? null : 'languages')}>View<ChevronRight size={14} /></button></div>
