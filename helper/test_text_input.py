@@ -23,6 +23,11 @@ class CharacterEventsTests(unittest.TestCase):
         self.assertEqual(character_events('\u0939'), [(0, 0x939, 4), (0, 0x939, 6)])
         self.assertEqual(character_events('\U0001f600'), [(0, 0xd83d, 4), (0, 0xd83d, 6), (0, 0xde00, 4), (0, 0xde00, 6)])
 
+    def test_newline_uses_balanced_shift_enter_instead_of_unicode_or_plain_enter(self):
+        for mapping in (-1, 0x0d):
+            self.assertEqual(character_events('\n', mapping),
+                             [(0x10, 0, 0), (0x0d, 0, 0), (0x0d, 0, 2), (0x10, 0, 2)])
+
     def test_one_character_required(self):
         for value in ('', 'ab'):
             with self.assertRaises(ValueError):

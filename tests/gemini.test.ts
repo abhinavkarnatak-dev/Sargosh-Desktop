@@ -33,6 +33,19 @@ describe('Gemini dictation cleanup adapter', () => {
     const result = await cleanTranscript({ ...options(), text: 'We will only keep play audio copy transcript and three dot option. Follow these steps first open settings second choose your microphone.', fetcher: async () => new Response(JSON.stringify(response(text))) });
     expect(result.text).toBe(text);
   });
+  it.each(['multi', 'hi'] as const)('passes the selected %s language separately and preserves returned script and lists', async language => {
+    const text = language === 'multi' ? 'Humein ye features chahiye:\n\n- Audio playback' : 'हमें ये features चाहिए:\n\n- Audio playback';
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(response(text))));
+    const result = await cleanTranscript({ ...options(), language, text: 'हमें ये features चाहिए audio playback', fetcher });
+    const body = JSON.parse(fetcher.mock.calls[0][1]!.body as string);
+    expect(JSON.parse(body.contents[0].parts[0].text).language).toBe(language);
+    expect(result.text).toBe(text);
+  });
+  it('allows bounded expansion from Hindi script to Romanized Hindi', async () => {
+    const text = 'Humein '.repeat(400).trim();
+    const result = await cleanTranscript({ ...options(), language: 'multi', text: 'हमें '.repeat(200), fetcher: async () => new Response(JSON.stringify(response(text))) });
+    expect(result.text).toBe(text);
+  });
   it('enforces ordinary hyphens even when Gemini returns long dashes', async () => {
     const result = await cleanTranscript({ ...options(), fetcher: async () => new Response(JSON.stringify(response('Tuesday\u2014no\u2013Thursday.'))) });
     expect(result.text).toBe('Tuesday-no-Thursday.');

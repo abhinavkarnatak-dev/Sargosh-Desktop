@@ -151,6 +151,21 @@ class UIAutomationTests(unittest.TestCase):
         self.assertEqual(sleep.call_count, len(batches) - 1)
 
     @patch('windows_uia.time.sleep')
+    def test_list_delivery_preserves_blank_lines_and_normalizes_windows_line_endings(self, _sleep):
+        instance = backend()
+        batches = []
+        def send(count, inputs, size):
+            batches.append([(inputs[i].ki.wVk, inputs[i].ki.wScan, inputs[i].ki.dwFlags) for i in range(count)])
+            self.assertTrue(all(inputs[i].ki.dwExtraInfo == INPUT_TAG for i in range(count)))
+            return count
+        instance.user32.SendInput = Function(send)
+        instance._send_text('Options:\r\n\r\n- A\n- B\rEnd')
+        newline = [(0x10, 0, 0), (0x0d, 0, 0), (0x0d, 0, 2), (0x10, 0, 2)]
+        self.assertEqual(sum(batch == newline for batch in batches), 4)
+        self.assertFalse(any(scan in (10, 13) and flags & 4 for batch in batches for key, scan, flags in batch))
+        self.assertEqual(len(batches), len('Options:\n\n- A\n- B\nEnd'))
+
+    @patch('windows_uia.time.sleep')
     def test_delivery_stops_if_focus_changes_between_characters(self, _sleep):
         element = Element()
         instance = backend(element)
@@ -282,6 +297,17 @@ class UIAutomationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'layout changed'):
             instance.insert_test(target)
         self.assertEqual(calls, [2])
+
+    def test_partial_newline_releases_enter_before_shift_without_retrying(self):
+        instance = backend()
+        calls = []
+        def send(count, inputs, size):
+            calls.append([(inputs[i].ki.wVk, inputs[i].ki.dwFlags) for i in range(count)])
+            return 2 if len(calls) == 1 else count
+        instance.user32.SendInput = Function(send)
+        with self.assertRaises(RuntimeError):
+            instance._send_text('\n')
+        self.assertEqual(calls[1:], [[(0x0d, 2)], [(0x10, 2)]])
 
     def test_partial_input_is_reported_as_uncertain(self):
         instance = backend()

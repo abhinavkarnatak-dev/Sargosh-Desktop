@@ -64,7 +64,7 @@ export async function cleanTranscript(options: {
     try { result = JSON.parse(parts.filter(part => !part.thought && typeof part.text === 'string').map(part => part.text).join('')); }
     catch { throw new CleanupError('GEMINI_RESPONSE', 'Gemini returned an invalid cleanup result. The original transcript is available.'); }
     if (!result || typeof result !== 'object' || Array.isArray(result) || Object.keys(result).length !== 1 ||
-        !('text' in result) || typeof result.text !== 'string' || result.text.length > Math.max(512, options.text.length * 2 + 256)) {
+        !('text' in result) || typeof result.text !== 'string' || result.text.length > Math.max(512, options.text.length * (options.language === 'multi' ? 4 : 2) + 256)) {
       throw new CleanupError('GEMINI_RESPONSE', 'Gemini returned an invalid cleanup result. The original transcript is available.');
     }
     return { text: normalizeDashes(result.text.trim()), model: options.model };

@@ -9,6 +9,9 @@ def character_events(character, mapping=-1, caps_lock=False):
     # Ctrl/Alt/AltGr combinations, which could execute application commands.
     if len(character) != 1:
         raise ValueError('Expected one Unicode character')
+    if character == '\n':
+        # Chat editors commonly submit on Enter; Shift+Enter inserts a line break.
+        return [(SHIFT, 0, 0), (0x0d, 0, 0), (0x0d, 0, KEY_UP), (SHIFT, 0, KEY_UP)]
     shift_state = (mapping >> 8) & 0xff
     key = mapping & 0xff
     if 0x20 <= ord(character) <= 0x7e and mapping != -1 and shift_state in (0, 1) and 0 < key < 255:

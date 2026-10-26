@@ -98,7 +98,7 @@ The transcript is displayed as text and can optionally be cleaned with Gemini. A
 
 ## Clean up with Gemini
 
-Cleanup recognizes clear spoken lists from context, including natural introductions such as "the options include", without requiring "first, second, third". It uses hyphen bullets for options and numbered lists for ordered steps. It preserves surrounding prose and keeps ambiguous narration as sentences. These rules also apply to Hindi/Hinglish enumerations without changing the original language or script.
+Cleanup recognizes clear spoken lists from context, including natural introductions such as "the options include", without requiring "first, second, third". It uses hyphen bullets for options and numbered lists for ordered steps. It preserves surrounding prose and keeps ambiguous narration as sentences. These rules also apply to Hindi/Hinglish enumerations. With Hinglish selected and cleanup enabled, Hindi speech is written in natural Romanized Hindi while English words remain English. Hindi mode preserves the original script. Without cleanup, the original recognition script is retained.
 
 With **Clean up with Gemini after transcription** selected, completed Deepgram text is sent to the backend cleanup route and then to Gemini. The checkbox is on initially. Turn it off to keep transcription as a Deepgram-only operation. **Transcribe automatically after recording** remains a separate setting, initially off. These settings last for the page session.
 
@@ -272,3 +272,5 @@ Edit [`assets/email/welcome.html`](assets/email/welcome.html) for the light/dark
 The sending function uses built-in `fetch`; no Resend SDK is installed. Development tests use PGlite to run the real PostgreSQL migration and account/lease/retry checks in an isolated in-memory database. Tests use fake recipient addresses and mock Resend calls; they never send email. The deployed Supabase scheduler and inbox delivery must also be checked with a fresh test account after setup. See [Supabase dashboard deployment](https://supabase.com/docs/guides/functions/quickstart-dashboard), [Cron setup](https://supabase.com/docs/guides/cron/quickstart), and [Resend request identifiers](https://resend.com/docs/dashboard/emails/idempotency-keys).
 
 Dictation and Insights statistics use rolling digits when values change. Updates continue from the previous value, and reduced-motion preferences are respected.
+
+Windows text delivery preserves paragraph and list breaks using Shift+Enter. The destination must support multiline input; some applications assign their own behavior to this shortcut.

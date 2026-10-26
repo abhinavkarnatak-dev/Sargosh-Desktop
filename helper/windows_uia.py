@@ -229,6 +229,7 @@ class UIAutomation:
         self.user32.SendInput.restype = wintypes.UINT
         # Some editors handle a rapid Unicode burst poorly. Pace whole characters,
         # keeping both UTF-16 surrogate units of a non-BMP character together.
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
         for character_index, character in enumerate(text):
             if character_index:
                 time.sleep(CHARACTER_INTERVAL_SECONDS)
@@ -243,11 +244,19 @@ class UIAutomation:
                 inputs[index].ki = KeyboardInput(key, scan, flags, 0, INPUT_TAG)
             sent = self.user32.SendInput(len(inputs), inputs, ctypes.sizeof(Input))
             if sent != len(inputs):
-                # If a partial batch pressed our Shift key, release that key only.
-                # Never resend characters: some may already be in the document.
-                if 0 < sent < len(events) and events[0] == (0x10, 0, 0):
+                # Release only keys this partial batch left pressed. Never resend text.
+                held = []
+                for key, scan, flags in events[:max(0, min(sent, len(events)))]:
+                    if key not in (0x10, 0x0d):
+                        continue
+                    if flags & 0x0002:
+                        if key in held:
+                            held.remove(key)
+                    else:
+                        held.append(key)
+                for key in reversed(held):
                     release = Input()
                     release.type = 1
-                    release.ki = KeyboardInput(0x10, 0, 0x0002, 0, INPUT_TAG)
+                    release.ki = KeyboardInput(key, 0, 0x0002, 0, INPUT_TAG)
                     self.user32.SendInput(1, ctypes.pointer(release), ctypes.sizeof(Input))
                 raise RuntimeError('Windows input delivery was incomplete. Inspect the destination before trying another session.')
