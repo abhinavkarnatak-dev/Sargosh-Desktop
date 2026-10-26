@@ -26,7 +26,7 @@ export class ShortcutSession {
     if (this.closed) return;
     await this.persist(value); this.value = value;
     try { await this.resume(); }
-    catch { throw new Error('Shortcut saved, but it could not be enabled. Close Settings and enable recording shortcuts on Dictation.'); }
+    catch { throw new Error('Shortcut saved, but it could not be enabled. Close Settings and use Try again on Dictation.'); }
   }); }
   cancel() { return this.run(() => this.resume()); }
   dispose() { this.closed = true; return this.run(() => this.resume()); }

@@ -11,6 +11,7 @@ async function authCall(channel: string, value?: unknown) {
   }
 }
 const bridge: DesktopBridge = {
+  startupReady: () => ipcRenderer.send('sargosh:ui-ready'),
   usage: () => authCall('sargosh:usage'),
   authState: () => authCall('sargosh:auth-state'),
   onAuthState: listener => { const handler = (_event: Electron.IpcRendererEvent, state: import('../shared/auth').AuthState) => listener(state); ipcRenderer.on('sargosh:auth-state', handler); return () => { ipcRenderer.removeListener('sargosh:auth-state', handler); }; },
@@ -20,6 +21,7 @@ const bridge: DesktopBridge = {
   cancelGoogleSignIn: () => authCall('sargosh:auth-google-cancel'),
   signOut: () => authCall('sargosh:auth-sign-out'),
   deleteAccount: confirmation => authCall('sargosh:auth-delete', confirmation),
+  completeOnboarding: () => authCall('sargosh:auth-onboarding'),
   updateProfile: (firstName, lastName) => authCall('sargosh:auth-profile', { firstName, lastName }),
   saveHistory: request => ipcRenderer.invoke('sargosh:history-save', request),
   updateHistory: request => ipcRenderer.invoke('sargosh:history-update', request),
@@ -44,6 +46,8 @@ const bridge: DesktopBridge = {
   deliverText: request => ipcRenderer.invoke('sargosh:deliver-text', request),
   cancelDelivery: sessionId => ipcRenderer.invoke('sargosh:delivery-cancel', sessionId),
   cleanupTranscript: request => ipcRenderer.invoke('sargosh:cleanup', request),
+  practiceTranscribeAudio: request => ipcRenderer.invoke('sargosh:practice-transcribe', request),
+  practiceCleanupTranscript: request => ipcRenderer.invoke('sargosh:practice-cleanup', request),
   transcribeAudio: request => ipcRenderer.invoke('sargosh:transcribe', request),
   cancelTranscription: requestId => ipcRenderer.invoke('sargosh:transcription-cancel', requestId),
   reportTranscription: status => ipcRenderer.invoke('sargosh:transcription-report', status),

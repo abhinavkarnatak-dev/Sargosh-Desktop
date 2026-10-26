@@ -11,6 +11,7 @@ export interface DayActivity { date: string; words: number }
 export interface Snapshot { preferences: Preferences; history: HistoryEntry[]; activity: DayActivity[]; totalWords: number; recordingCount: number; totalDurationMs: number }
 export interface RuntimeStatus { desktop: boolean; helper: boolean; api: boolean; auth: boolean; stt: boolean; cleanup: boolean }
 export interface DesktopBridge {
+  startupReady?(): void;
   usage?(): Promise<import('./usage').AccountUsage|null>;
   authState(): Promise<import('./auth').AuthState>;
   onAuthState(listener: (state: import('./auth').AuthState) => void): () => void;
@@ -20,6 +21,7 @@ export interface DesktopBridge {
   cancelGoogleSignIn(): Promise<void>;
   signOut(): Promise<void>;
   deleteAccount(confirmation: 'DELETE'): Promise<void>;
+  completeOnboarding(): Promise<void>;
   updateProfile(firstName: string, lastName: string): Promise<void>;
   saveHistory(request: HistoryCapture): Promise<void>;
   updateHistory(request: HistoryResult): Promise<void>;
@@ -36,6 +38,8 @@ export interface DesktopBridge {
   onOpenSettings(listener: () => void): () => void;
   deliverText(request: DeliveryRequest): Promise<DeliveryResult>;
   cancelDelivery(sessionId: string): Promise<void>;
+  practiceTranscribeAudio?: DesktopBridge['transcribeAudio'];
+  practiceCleanupTranscript?: DesktopBridge['cleanupTranscript'];
   cleanupTranscript(request: CleanupRequest): Promise<{ ok: true; result: CleanupResult } | { ok: false; code: string; message: string }>;
   transcribeAudio(request: TranscriptionRequest): Promise<{ ok: true; result: Transcript } | { ok: false; code: string; message: string }>;
   cancelTranscription(requestId: string): Promise<void>;

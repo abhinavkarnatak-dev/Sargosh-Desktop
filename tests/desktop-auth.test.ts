@@ -59,3 +59,21 @@ it('clears saved credentials and switches away after account deletion even when 
   expect(clear).toHaveBeenCalledOnce(); expect(auth.snapshot().phase).toBe('signed-out'); expect(auth.snapshot().user).toBeNull(); expect(switched).toHaveBeenLastCalledWith(null);
   await expect(auth.accessToken()).rejects.toThrow('Sign in'); await auth.dispose();
 });
+
+it('requires onboarding for newly created Google accounts with an existing display name, then saves completion on the account', async () => {
+  const newUser = {...user, created_at:'2026-10-27T00:00:00Z', user_metadata:{full_name:'Priya Sharma'}};
+  mock.getSession.mockResolvedValue({data:{session:{...session,user:newUser}},error:null});
+  mock.getUser.mockResolvedValue({data:{user:newUser},error:null});
+  const auth=service(); await auth.initialize();
+  expect(auth.snapshot().user).toMatchObject({firstName:'Priya',onboardingRequired:true});
+  mock.updateUser.mockResolvedValueOnce({data:{user:{...newUser,user_metadata:{...newUser.user_metadata,sargosh_onboarding_version:1}}},error:null});
+  await auth.completeOnboarding();
+  expect(mock.updateUser).toHaveBeenCalledWith({data:{sargosh_onboarding_version:1}});
+  expect(auth.snapshot().user?.onboardingRequired).toBe(false); await auth.dispose();
+});
+it('leaves onboarding incomplete when saving completion fails', async () => {
+  const newUser={...user,created_at:'2026-10-27T00:00:00Z'};
+  mock.getSession.mockResolvedValue({data:{session:{...session,user:newUser}},error:null});mock.getUser.mockResolvedValue({data:{user:newUser},error:null});
+  const auth=service();await auth.initialize();mock.updateUser.mockResolvedValueOnce({data:{user:null},error:new Error('offline')});
+  await expect(auth.completeOnboarding()).rejects.toThrow('Setup could not be saved');expect(auth.snapshot().user?.onboardingRequired).toBe(true);await auth.dispose();
+});

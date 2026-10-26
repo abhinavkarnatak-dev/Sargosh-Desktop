@@ -12,6 +12,7 @@ export async function transcribeViaLocalAPI(request: TranscriptionRequest, signa
   }
   if(!base.startsWith('/'))base=apiEndpoint(base);
   const remote=hostedEndpoint(base);
+  if(request.practice && !remote)throw new LocalApiError('PRACTICE_UNAVAILABLE','Practice requires the hosted service.');
   const deadline = AbortSignal.timeout(remote?180_000:75_000);
   const combined = AbortSignal.any([signal, deadline]);
   const read = async (response: Response) => {
@@ -27,7 +28,7 @@ export async function transcribeViaLocalAPI(request: TranscriptionRequest, signa
   try {
     const session = remote ? await warmHostedAPI(base,combined,fetcher,accessToken) : await read(await fetcher(base + '/v1/local-session', { signal: combined, cache: 'no-store', redirect: 'error' })) as { token?: unknown };
     if (!remote && (typeof session.token !== 'string' || !/^[a-f0-9]{64}$/.test(session.token))) throw new LocalApiError('LOCAL_SESSION', 'Could not open a local transcription session.');
-    const result = await read(await fetcher(base + '/v1/transcriptions?language=' + request.language, {
+    const result = await read(await fetcher(base + (request.practice ? '/v1/practice/transcriptions?language=' : '/v1/transcriptions?language=') + request.language, {
       method: 'POST', signal: combined, redirect: 'error', headers: {
         ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': request.mimeType, ...(!remote?{'x-sargosh-token': session.token as string}:{}), 'x-sargosh-request-id': request.requestId
       }, body: request.audio
@@ -52,6 +53,7 @@ export async function cleanupViaLocalAPI(request: CleanupRequest, signal: AbortS
   }
   if(!base.startsWith('/'))base=apiEndpoint(base);
   const remote=hostedEndpoint(base);
+  if(request.practice && !remote)throw new LocalApiError('PRACTICE_UNAVAILABLE','Practice requires the hosted service.');
   const deadline = AbortSignal.timeout(remote?120_000:30_000);
   const combined = AbortSignal.any([signal, deadline]);
   const read = async (response: Response) => {
@@ -66,7 +68,7 @@ export async function cleanupViaLocalAPI(request: CleanupRequest, signal: AbortS
   try {
     const session = remote ? await warmHostedAPI(base,combined,fetcher,accessToken) : await read(await fetcher(base + '/v1/local-session', { signal: combined, cache: 'no-store', redirect: 'error' })) as { token?: unknown };
     if (!remote && (typeof session?.token !== 'string' || !/^[a-f0-9]{64}$/.test(session.token))) throw new LocalApiError('LOCAL_SESSION', 'Could not open a local cleanup session.');
-    const result = await read(await fetcher(base + '/v1/cleanup', {
+    const result = await read(await fetcher(base + (request.practice ? '/v1/practice/cleanup' : '/v1/cleanup'), {
       method: 'POST', signal: combined, redirect: 'error', headers: {
         ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json', ...(!remote?{'x-sargosh-token': session.token as string}:{}), 'x-sargosh-request-id': request.requestId
       }, body: JSON.stringify({ text: request.text, language: request.language })

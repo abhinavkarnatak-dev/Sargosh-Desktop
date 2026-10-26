@@ -3,8 +3,9 @@ import type { KeyboardEvent } from 'react';
 import { cloudBusy, recording } from './audio/runtime';
 import { recordingBusy } from '../shared/recording';
 import { ShortcutSession } from './shortcut-session';
-export function ShortcutEditor({ shortcut, onSave }: { shortcut: string; onSave(value: string): Promise<void> }) {
+export function ShortcutEditor({ shortcut, onSave, onEditingChange }: { shortcut: string; onSave(value: string): Promise<void>; onEditingChange?(active: boolean): void }) {
   const [editing, setEditing] = useState(false); const [busy, setBusy] = useState(false);
+  useEffect(() => { onEditingChange?.(editing || busy); }, [editing, busy, onEditingChange]);
   const [draft, setDraft] = useState(shortcut); const [message, setMessage] = useState('');
   const input = useRef<HTMLInputElement>(null); const candidate = useRef<string | null>(null);
   const save = useRef(onSave); save.current = onSave;

@@ -45,7 +45,7 @@ beforeEach(async () => {
   };
   vi.stubGlobal('window', { sargosh: bridge, addEventListener: vi.fn() });
   runtime = await import('../src/renderer/audio/runtime');
-  runtime.initializeRecording(); await flush();
+  runtime.initializeRecording(); runtime.transcription.configure({ automatic: false }); await flush();
 });
 afterEach(async () => {
   runtime.recording.clear(); await flush();
@@ -94,7 +94,7 @@ describe('native shortcut to recording owner integration', () => {
     expect(fake.transcribe).toHaveBeenCalledOnce();
     expect(runtime.transcription.getState()).toMatchObject({ phase: 'completed', result: { text: 'Recognized text' } });
   });
-  it('keeps automatic upload off unless the user enables it', async () => {
+  it('does not upload in explicitly selected manual mode', async () => {
     speaking(); await flush(); commandListener('finish'); await flush();
     expect(runtime.recording.getState().phase).toBe('ready'); expect(fake.transcribe).not.toHaveBeenCalled();
   });
@@ -318,4 +318,16 @@ it('keeps the pipeline busy while saving and respects cancellation before cloud 
     commandListener('cancel'); save(); await flush(); await flush();
     expect(fake.transcribe).not.toHaveBeenCalled(); expect(runtime.transcription.getState().phase).toBe('cancelled'); expect(runtime.cloudBusy()).toBe(false);
   } finally { arrayBuffer.mockRestore(); }
+});
+
+it('keeps practice dictation inside onboarding instead of inserting into another app', async () => {
+  const save = vi.fn(async () => {}), update = vi.fn(async () => {});
+  Object.assign(bridge, { saveHistory: save, updateHistory: update });
+  runtime.setTutorialMode(true); runtime.transcription.configure({automatic:true});
+  speaking(); await flush(); commandListener('finish'); await flush();
+  expect(fake.transcribe).toHaveBeenCalledOnce(); expect(fake.cleanup).toHaveBeenCalledOnce();
+  expect(runtime.cleanup.getState().result?.text).toBe('Cleaned text');
+  expect(bridge.deliverText).not.toHaveBeenCalled();
+  expect(save).not.toHaveBeenCalled(); expect(update).not.toHaveBeenCalled();
+  runtime.recording.clear(); runtime.setTutorialMode(false);
 });

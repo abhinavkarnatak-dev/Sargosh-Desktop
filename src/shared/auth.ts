@@ -1,4 +1,9 @@
-export interface AccountUser { id: string; email: string; firstName: string; lastName: string }
+// Preserve returning users' existing flow. Keep this rollout time fixed in future releases.
+export const ONBOARDING_INTRODUCED_AT = '2026-10-26T01:31:59Z';
+export function needsOnboarding(createdAt: string | undefined, metadata: Record<string, unknown> = {}) {
+  return Number.isFinite(Date.parse(createdAt ?? '')) && Date.parse(createdAt!) >= Date.parse(ONBOARDING_INTRODUCED_AT) && metadata.sargosh_onboarding_version !== 1;
+}
+export interface AccountUser { id: string; email: string; firstName: string; lastName: string; onboardingRequired?: boolean }
 export const hasProfileName = (user: AccountUser | null | undefined): boolean => Boolean(user?.firstName.trim());
 export interface AuthState { configured: boolean; phase: 'loading' | 'signed-out' | 'signed-in'; user: AccountUser | null; googlePending: boolean; message: string }
 export const INITIAL_AUTH: AuthState = { configured: false, phase: 'loading', user: null, googlePending: false, message: '' };

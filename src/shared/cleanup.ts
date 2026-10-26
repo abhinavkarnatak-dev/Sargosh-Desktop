@@ -4,7 +4,7 @@ export type CleanupModel = typeof CLEANUP_MODELS[number];
 export const DEFAULT_CLEANUP_MODEL: CleanupModel = 'gemini-3.5-flash-lite';
 export const isCleanupModel = (value: unknown): value is CleanupModel => CLEANUP_MODELS.some(model => model === value);
 export const MAX_CLEANUP_CHARS = 24_000;
-export interface CleanupRequest { requestId: string; text: string; language: SpeechLanguage }
+export interface CleanupRequest { practice?: boolean; requestId: string; text: string; language: SpeechLanguage }
 export interface CleanupResult { text: string; model: CleanupModel }
 export interface CleanupState {
   phase: 'idle' | 'working' | 'completed' | 'failed' | 'cancelled';

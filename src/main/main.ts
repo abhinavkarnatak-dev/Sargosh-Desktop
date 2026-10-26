@@ -1,3 +1,5 @@
+import { createSplash } from './splash';
+import { StartupGate } from './startup';
 import { validAccountUsage } from '../shared/usage';
 import { apiEndpoint } from '../shared/api-endpoint';
 import { readFileSync } from 'node:fs';
@@ -31,6 +33,15 @@ const rendererURL = process.env.SARGOSH_RENDERER_URL;
 if (dev) app.setPath('userData', path.join(root, '.local', 'electron'));
 app.setName('Sargosh');
 let mainWindow: BrowserWindow | undefined;
+let splashWindow: BrowserWindow | undefined;
+function closeSplash() { if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy(); splashWindow = undefined; }
+const startup = new StartupGate(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); closeSplash(); });
+function startupFailed() {
+  if (startup.complete || quitting) return;
+  startup.cancel(); closeSplash();
+  dialog.showErrorBox('Sargosh could not open', 'The app could not finish starting. Please restart Sargosh.');
+  app.quit();
+}
 let overlayWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let quitting = false;
@@ -93,12 +104,13 @@ function createWindow(overlay = false): BrowserWindow {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => { if (!trustedURL(url)) event.preventDefault(); });
   if (rendererURL) void window.loadURL(rendererURL + (overlay ? '/#overlay' : '/')); else void window.loadFile(rendererFile, { hash: overlay ? 'overlay' : '' });
-  window.once('ready-to-show', () => overlay ? window.showInactive() : window.show());
+  window.once('ready-to-show', () => overlay ? window.showInactive() : startup.painted());
+  if (!overlay) window.webContents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => { if (isMainFrame && code !== -3) startupFailed(); });
   if (overlay) {
     const area = screen.getPrimaryDisplay().workArea;
     window.setPosition(Math.round(area.x + (area.width - 420) / 2), area.y + area.height - 135);
   } else {
-    window.webContents.on('render-process-gone', () => stopOwner('The recording window stopped. Reopen Sargosh before recording again.'));
+    window.webContents.on('render-process-gone', () => { if (!startup.complete) startupFailed(); else stopOwner('The recording window stopped. Reopen Sargosh before recording again.'); });
     window.webContents.on('did-start-loading', () => {
       if (recordingBusy(recordingState) || windowsState.enabled && windowsState.purpose === 'recording') stopOwner('The app reloaded. Any active recording was discarded.');
     });
@@ -106,10 +118,11 @@ function createWindow(overlay = false): BrowserWindow {
   }
   return window;
 }
-function showMain(): void { mainWindow?.show(); mainWindow?.focus(); }
+function showMain(): void { if (!startup.complete) { if (splashWindow && !splashWindow.isDestroyed()) splashWindow.show(); return; } mainWindow?.show(); mainWindow?.focus(); }
 if (ownsLock) {
   app.on('second-instance', showMain);
   app.whenReady().then(async () => {
+    splashWindow = createSplash(path.join(root, dev ? 'src/renderer/public/brand' : 'dist/renderer/brand'), nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
     Menu.setApplicationMenu(null);
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
       const mediaTypes = (details as { mediaTypes?: string[] }).mediaTypes || [];
@@ -122,6 +135,10 @@ if (ownsLock) {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sargosh:history-changed');
     });
     await history.initialize().catch(() => console.error('Local recording history could not be opened.'));
+    ipcMain.on('sargosh:ui-ready', event => {
+      try { checkSender(event); } catch { return; }
+      if (event.sender === mainWindow?.webContents) startup.rendered();
+    });
     function ownerHandle(channel: string, work: (value: any) => unknown) {
       ipcMain.handle(channel, (event, value) => { checkSender(event); if (event.sender !== mainWindow?.webContents || quitting || accountChanging) throw new Error('History is unavailable.'); if (channel.startsWith('sargosh:history-') || channel === 'sargosh:delete') requireAccount(); return work(value); });
     }
@@ -168,6 +185,7 @@ if (ownsLock) {
     authAction('sargosh:auth-google', () => auth!.signInGoogle());
     authAction('sargosh:auth-google-cancel', () => auth!.cancelGoogle());
     authAction('sargosh:auth-sign-out', () => auth!.signOut());
+    authAction('sargosh:auth-onboarding', () => auth!.completeOnboarding());
     authAction('sargosh:auth-profile', value => auth!.updateProfile(value?.firstName, value?.lastName));
     const accountDeletion = new AccountDeletion(path.join(dataDirectory, 'account-cleanup.json'), async userId => {
       await history?.drain();
@@ -223,20 +241,20 @@ if (ownsLock) {
     });
     handle('sargosh:windows-status', () => helper.call('windows.status'));
     handle('sargosh:recording-status', () => recordingState);
-    ipcMain.handle('sargosh:transcribe', (event, request: TranscriptionRequest) => {
+    for (const channel of ['sargosh:transcribe', 'sargosh:practice-transcribe']) ipcMain.handle(channel, (event, request: TranscriptionRequest) => {
       checkSender(event);
       if (event.sender !== mainWindow?.webContents || !request || !isRequestId(request.requestId) || !isSpeechLanguage(request.language) ||
           !(request.audio instanceof ArrayBuffer) || !request.audio.byteLength || request.audio.byteLength > MAX_AUDIO_BYTES ||
           typeof request.mimeType !== 'string' || !audioType(request.mimeType)) throw new Error('Invalid audio transcription request.');
       if (historyRetry) return { ok: false, code: 'BUSY', message: 'Wait for the transcript retry to finish.' };
-      return transcriber.transcribe(request);
+      return transcriber.transcribe({ ...request, practice: channel === 'sargosh:practice-transcribe' });
     });
-    ipcMain.handle('sargosh:cleanup', (event, request: CleanupRequest) => {
+    for (const channel of ['sargosh:cleanup', 'sargosh:practice-cleanup']) ipcMain.handle(channel, (event, request: CleanupRequest) => {
       checkSender(event);
       if (event.sender !== mainWindow?.webContents || !request || !isRequestId(request.requestId) || !isSpeechLanguage(request.language) ||
           typeof request.text !== 'string' || !request.text.trim() || request.text.length > MAX_CLEANUP_CHARS) throw new Error('Invalid cleanup request.');
       if (historyRetry) return { ok: false, code: 'BUSY', message: 'Wait for the transcript retry to finish.' };
-      return transcriber.cleanup(request);
+      return transcriber.cleanup({ ...request, practice: channel === 'sargosh:practice-cleanup' });
     });
     ipcMain.handle('sargosh:transcription-cancel', (event, requestId: unknown) => {
       checkSender(event);
@@ -321,7 +339,7 @@ if (ownsLock) {
     handle('sargosh:windows-action', (action: unknown) => {
       if (action === 'start-hands-free') requireAccount();
       if (action === 'start-hands-free' && historyRetry) throw new Error('Wait for the transcript retry to finish.');
-      if (!dev || !['cancel', 'finish', 'start-hands-free', 'disarm'].includes(String(action))) throw new Error('Invalid Windows test action.');
+      if (!['cancel', 'finish', 'start-hands-free', 'disarm'].includes(String(action))) throw new Error('Invalid recording action.');
       return helper.call('windows.' + action);
     });
     handle('sargosh:windows-insert-test', (sessionId: unknown) => {
@@ -373,12 +391,12 @@ if (ownsLock) {
     tray.setToolTip('Sargosh');
     tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Open Sargosh', click: showMain }, { type: 'separator' }, { label: 'Quit Sargosh', click: () => app.quit() }]));
     tray.on('click', showMain);
-  }).catch(error => { console.error(error); app.quit(); });
+  }).catch(() => { startup.cancel(); closeSplash(); dialog.showErrorBox('Sargosh could not open', 'The app could not finish starting. Please restart Sargosh.'); app.quit(); });
 }
 app.on('window-all-closed', () => { /* The tray owns the application lifetime. */ });
 app.on('before-quit', event => {
   if (quitting) { tray?.destroy(); return; }
-  event.preventDefault(); quitting = true;
+  event.preventDefault(); quitting = true; startup.cancel(); closeSplash();
   recordingCommands.cancelAll(); transcriber.cancelAll();
   void Promise.all([history?.drain(), auth?.dispose(), authStorage?.drain()]).catch(() => {}).then(() => helper.stop()).finally(() => app.quit());
 });

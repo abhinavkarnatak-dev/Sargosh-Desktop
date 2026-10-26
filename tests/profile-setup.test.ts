@@ -5,7 +5,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { App } from '../src/renderer/App';
 import { EMPTY_SNAPSHOT } from '../src/shared/types';
 import type { AuthState } from '../src/shared/auth';
-vi.mock('../src/renderer/RecordingPanel',()=>({RecordingPanel:()=>createElement('div',null,'Recording workspace')}));
+vi.mock('../src/renderer/DictationGuide',()=>({DictationGuide:()=>createElement('div',null,'Recording workspace')}));
+vi.mock('../src/renderer/Onboarding',()=>({Onboarding:()=>createElement('div',null,'First-time setup tutorial')}));
 vi.mock('../src/renderer/HistoryList',()=>({HistoryList:()=>createElement('div',null,'Saved history')}));
 vi.mock('../src/renderer/SettingsDialog',()=>({SettingsDialog:()=>null}));
 vi.mock('../src/renderer/audio/runtime',()=>({setRecordingPreferences:()=>{}}));
@@ -42,4 +43,14 @@ it('takes returning accounts with a saved name directly to the workspace',async(
 it('asks again after reopening if the account still has no saved name',async()=>{
   await render();await input('#setup-first-name','Unsaved name');await act(async()=>root.unmount());root=createRoot(host);await render();
   expect((host.querySelector('#setup-first-name') as HTMLInputElement).value).toBe('');expect(snapshot).not.toHaveBeenCalled();
+});
+
+it('shows new email accounts the tutorial only after saving their name',async()=>{
+ state={...state,user:{...state.user!,onboardingRequired:true}};await render();expect(host.textContent).not.toContain('First-time setup tutorial');
+ await input('#setup-first-name','Priya');await submit();expect(host.textContent).toContain('First-time setup tutorial');
+});
+it('shows new Google accounts with names the tutorial, and hides it after completion',async()=>{
+ state={...state,user:{...state.user!,firstName:'Priya',onboardingRequired:true}};await render();expect(host.textContent).toContain('First-time setup tutorial');
+ await act(async()=>{state={...state,user:{...state.user!,onboardingRequired:false}};listeners.forEach(listener=>listener(state));});
+ expect(host.textContent).not.toContain('First-time setup tutorial');
 });

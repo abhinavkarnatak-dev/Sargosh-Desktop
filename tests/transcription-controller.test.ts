@@ -54,3 +54,8 @@ describe('transcription result lifecycle', () => {
     expect(controller.getState().message).toContain('No speech');
   });
 });
+
+it('enables automatic transcription by default for normal dictation', () => {
+  const controller = new TranscriptionController(vi.fn());
+  expect(controller.getState().automatic).toBe(true);
+});

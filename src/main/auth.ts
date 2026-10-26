@@ -1,10 +1,10 @@
 import { createClient, type SupabaseClient, type Session, type User } from '@supabase/supabase-js';
-import { INITIAL_AUTH, validEmail, isEmailCode, hasProfileName, type AuthState, type AccountUser } from '../shared/auth';
+import { INITIAL_AUTH, needsOnboarding, validEmail, isEmailCode, hasProfileName, type AuthState, type AccountUser } from '../shared/auth';
 import type { AuthStorage } from './auth-storage';
 import { GoogleCallback } from './google-callback';
 function profile(user: User): AccountUser {
   const metadata = user.user_metadata ?? {}; const full = typeof metadata.full_name === 'string' ? metadata.full_name.trim().split(/\s+/) : [];
-  return { id: user.id, email: user.email ?? '', firstName: String(metadata.first_name ?? full.shift() ?? '').slice(0,80), lastName: String(metadata.last_name ?? full.join(' ')).slice(0,80) };
+  return { onboardingRequired: needsOnboarding(user.created_at, metadata), id: user.id, email: user.email ?? '', firstName: String(metadata.first_name ?? full.shift() ?? '').slice(0,80), lastName: String(metadata.last_name ?? full.join(' ')).slice(0,80) };
 }
 export class DesktopAuth {
   private client?: SupabaseClient;
@@ -87,6 +87,12 @@ export class DesktopAuth {
     if (!this.current || typeof firstName !== 'string' || !firstName.trim() || typeof lastName !== 'string' || firstName.length > 80 || lastName.length > 80 || /[\x00-\x1f]/.test(firstName + lastName)) throw new Error('Enter your first name. Each name can be up to 80 characters.');
     const { data, error } = await this.ready().auth.updateUser({ data: { first_name: firstName.trim(), last_name: lastName.trim() } });
     if (error || !data.user) throw new Error('Your profile could not be saved. Please try again.');
+    await this.accept({ ...this.current, user: data.user });
+  }
+  async completeOnboarding() {
+    if (!this.current || !hasProfileName(this.state.user)) throw new Error('Finish your profile before completing setup.');
+    const { data, error } = await this.ready().auth.updateUser({ data: { sargosh_onboarding_version: 1 } });
+    if (error || !data.user) throw new Error('Setup could not be saved. Please try again.');
     await this.accept({ ...this.current, user: data.user });
   }
   async accessToken() {

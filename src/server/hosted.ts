@@ -67,10 +67,11 @@ export function createHostedServer(options:HostedOptions){
   if(error instanceof UsageError||error instanceof AudioError||error instanceof SpeechError||error instanceof CleanupError)return reply.code(error.status).send({code:error.code,message:error.message,...(error instanceof UsageError&&error.resetAt?{resetAt:error.resetAt}:{})});
   return reply.code(503).send({code:'CLOUD_UNAVAILABLE',message:'Cloud dictation could not complete. Please try later.'});
  }
- server.post('/v1/transcriptions',{onRequest:authorized},async(request,reply)=>{
+ for(const route of ['/v1/transcriptions','/v1/practice/transcriptions']) server.post(route,{onRequest:authorized},async(request,reply)=>{
+  const practice=route.includes('/practice/');
   const language=(request.query as {language?:unknown})?.language,id=request.headers['x-sargosh-request-id'];
   if(!isSpeechLanguage(language)||!isRequestId(id)||!audioType(request.headers['content-type']??'')||!Buffer.isBuffer(request.body)||!request.body.length)return reply.code(400).send({code:'INVALID_REQUEST',message:'A recording, supported language, and request ID are required.'});
-  const owner=owners.get(request)!;const fingerprint=createHash('sha256').update(language).update(request.body).digest('hex');
+  const owner=owners.get(request)!;const fingerprint=createHash('sha256').update(practice?'practice:':'').update(language).update(request.body).digest('hex');
   const abort=new AbortController();const disconnect=()=>{if(!reply.raw.writableEnded)abort.abort();};
   let lease:UsageLease|undefined,dispatched=false,entered=false;
   try{
@@ -82,7 +83,9 @@ export function createHostedServer(options:HostedOptions){
    const normalized=await(options.normalize??((bytes,signal)=>normalizeAudio(bytes,signal,options.ffmpegPath)))(request.body,abort.signal);
    if(!Number.isInteger(normalized.durationSeconds)||normalized.durationSeconds<1||normalized.durationSeconds>300)throw new AudioError('RECORDING_LIMIT','A recording can be at most 5 minutes.');
    const cost=Math.ceil(normalized.durationSeconds*(options.sttRateMicroPerMinute??5200)/60);
-   lease=await store.reserve(owner,id,'stt',fingerprint,normalized.durationSeconds,cost);
+   if(practice && normalized.durationSeconds>20)throw new UsageError('PRACTICE_DURATION','Keep practice recordings within 20 seconds.',400);
+   if(practice && !store.reservePractice)throw new UsageError('PRACTICE_UNAVAILABLE','Practice is not available yet. Please try later.',503);
+   lease=practice?await store.reservePractice!(owner,id,'stt',fingerprint,normalized.durationSeconds,cost):await store.reserve(owner,id,'stt',fingerprint,normalized.durationSeconds,cost);
    if(abort.signal.aborted)throw new AudioError('CANCELLED','Recording cancelled.',499);
    await store.dispatch(lease);dispatched=true;
    const result=await recognizeAudio({apiKey:options.apiKey!,audio:normalized.audio,mimeType:'audio/wav',language,signal:abort.signal,fetcher:options.fetcher});
@@ -92,11 +95,12 @@ export function createHostedServer(options:HostedOptions){
    if(entered)active--;request.raw.removeListener('aborted',disconnect);reply.raw.removeListener('close',disconnect);
   }
  });
- server.post('/v1/cleanup',{bodyLimit:128*1024,onRequest:authorized},async(request,reply)=>{
+ for(const route of ['/v1/cleanup','/v1/practice/cleanup']) server.post(route,{bodyLimit:128*1024,onRequest:authorized},async(request,reply)=>{
+  const practice=route.includes('/practice/');
   const body=request.body as {text?:unknown;language?:unknown}|null,id=request.headers['x-sargosh-request-id'];
   if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>!['text','language'].includes(key))||typeof body.text!=='string'||!body.text.trim()||body.text.length>MAX_CLEANUP_CHARS||!isSpeechLanguage(body.language)||!isRequestId(id))return reply.code(400).send({code:'CLEANUP_INPUT',message:'A transcript, supported language, and request ID are required.'});
   const owner=owners.get(request)!,model=options.geminiModel??DEFAULT_CLEANUP_MODEL;
-  const fingerprint=createHash('sha256').update(CLEANUP_PROMPT_VERSION).update(model).update(body.language).update(body.text).digest('hex');
+  const fingerprint=createHash('sha256').update(practice?'practice:':'').update(CLEANUP_PROMPT_VERSION).update(model).update(body.language).update(body.text).digest('hex');
   const abort=new AbortController();const disconnect=()=>{if(!reply.raw.writableEnded)abort.abort();};
   let lease:UsageLease|undefined,dispatched=false,entered=false;
   try{
@@ -106,7 +110,8 @@ export function createHostedServer(options:HostedOptions){
    request.raw.once('aborted',disconnect);reply.raw.once('close',disconnect);
    // UTF-8 byte count conservatively bounds text tokens; output includes the model's thinking budget.
    const reservedCost=Math.ceil((Buffer.byteLength(JSON.stringify({language:body.language,transcript:body.text}))+Buffer.byteLength(CLEANUP_INSTRUCTIONS)+1024)*.30+cleanupOutputLimit(body.text)*2.50);
-   lease=await store.reserve(owner,id,'cleanup',fingerprint,0,reservedCost);
+   if(practice && (body.text.length>3000 || !store.reservePractice))throw new UsageError('PRACTICE_UNAVAILABLE','This practice request cannot be processed.',400);
+   lease=practice?await store.reservePractice!(owner,id,'cleanup',fingerprint,0,reservedCost):await store.reserve(owner,id,'cleanup',fingerprint,0,reservedCost);
    if(abort.signal.aborted)throw new AudioError('CANCELLED','Cleanup cancelled.',499);
    await store.dispatch(lease);dispatched=true;let actualCost:number|undefined;
    const result=await cleanTranscript({apiKey:options.geminiApiKey!,model,text:body.text,language:body.language,signal:abort.signal,fetcher:options.geminiFetcher,onUsage:usage=>{actualCost=Math.ceil(usage.inputTokens*.30+usage.outputTokens*2.50);}});

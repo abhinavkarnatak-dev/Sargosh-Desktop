@@ -14,10 +14,10 @@ export interface TranscriptionState extends TranscriptionStatus {
   sessionId: string | null; result: Transcript | null; language: SpeechLanguage; automatic: boolean;
 }
 export const INITIAL_TRANSCRIPTION: TranscriptionState = {
-  phase: 'idle', message: '', sessionId: null, result: null, language: 'en', automatic: false
+  phase: 'idle', message: '', sessionId: null, result: null, language: 'en', automatic: true
 };
 export interface TranscriptionRequest {
-  requestId: string; audio: ArrayBuffer; mimeType: string; language: SpeechLanguage;
+  practice?: boolean; requestId: string; audio: ArrayBuffer; mimeType: string; language: SpeechLanguage;
 }
 export const isRequestId = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(value);
 export const AUDIO_TYPES = ['audio/webm', 'audio/ogg', 'audio/wav', 'audio/mpeg', 'audio/mp4'];

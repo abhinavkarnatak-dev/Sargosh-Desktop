@@ -8,9 +8,12 @@ export interface UsageStore {
  dispatch(lease:UsageLease):Promise<void>;
  finish(lease:UsageLease,costMicro?:number):Promise<void>;
  release(lease:UsageLease):Promise<void>;
+ reservePractice?(userId:string,requestId:string,kind:'stt'|'cleanup',fingerprint:string,seconds:number,costMicro:number):Promise<UsageLease>;
  snapshot(userId:string):Promise<AccountUsage>;
 }
 const messages:Record<string,string>={
+ PRACTICE_LIMIT:'Your three practice attempts are used. Finish setup to start normal dictation.',
+ PRACTICE_UNAVAILABLE:'Practice is available only during unfinished first-time setup.',
  AUTH_REQUIRED:'Verify your email before using cloud dictation.',
  DAILY_LIMIT:'You have reached your daily 10-minute allowance.',
  MONTHLY_LIMIT:'You have reached your monthly 100-minute allowance.',
@@ -28,8 +31,10 @@ export class SupabaseUsageStore implements UsageStore {
    if(!response.ok){console.warn(JSON.stringify({event:'usage_storage_error',rpc:name,status:response.status}));throw new Error();}return await response.json();
   }catch{throw new UsageError('USAGE_UNAVAILABLE','Could not confirm your usage allowance. Please try again.',503);}
  }
- async reserve(userId:string,requestId:string,kind:'stt'|'cleanup',fingerprint:string,seconds:number,costMicro:number){
-  const result=await this.rpc('reserve_usage',{p_user_id:userId,p_request_id:requestId,p_kind:kind,p_fingerprint:fingerprint,p_seconds:seconds,p_cost_micro:costMicro});
+ async reserve(userId:string,requestId:string,kind:'stt'|'cleanup',fingerprint:string,seconds:number,costMicro:number){return this.reserveWith('reserve_usage',userId,requestId,kind,fingerprint,seconds,costMicro);}
+ async reservePractice(userId:string,requestId:string,kind:'stt'|'cleanup',fingerprint:string,seconds:number,costMicro:number){return this.reserveWith('reserve_practice_usage',userId,requestId,kind,fingerprint,seconds,costMicro);}
+ private async reserveWith(rpc:string,userId:string,requestId:string,kind:'stt'|'cleanup',fingerprint:string,seconds:number,costMicro:number){
+  const result=await this.rpc(rpc,{p_user_id:userId,p_request_id:requestId,p_kind:kind,p_fingerprint:fingerprint,p_seconds:seconds,p_cost_micro:costMicro});
   if(result?.code!=='OK'||typeof result.leaseId!=='string'){
    const code=typeof result?.code==='string'?result.code:'USAGE_UNAVAILABLE';
    const resetAt=typeof result?.resetAt==='string'?result.resetAt:undefined;

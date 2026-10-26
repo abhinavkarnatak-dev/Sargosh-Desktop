@@ -27,7 +27,7 @@ begin
  update sargosh_private.usage_operations set state='released' where user_id=test_user and state='reserved' and reserved_at<now()-interval '2 minutes';
  select coalesce(sum(seconds) filter(where reserved_at>=day_start),0),coalesce(sum(seconds),0)
  into day_used,month_used from sargosh_private.usage_operations
- where user_id=test_user and kind='stt' and state<>'released' and reserved_at>=month_start;
+ where user_id=test_user and kind='stt' and not practice and state<>'released' and reserved_at>=month_start;
 
  -- Give the test account one second of remaining daily allowance, then request two.
  update sargosh_private.usage_policy set daily_seconds=day_used+1,

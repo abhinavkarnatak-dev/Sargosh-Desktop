@@ -1,3 +1,4 @@
+import { setPracticeSession } from './practice';
 import { savedHistory } from './history';
 import { DeliveryController, deliveryTransport } from './delivery';
 import { useSyncExternalStore } from 'react';
@@ -15,6 +16,8 @@ import { recordingBusy } from '../../shared/recording';
 let preferences: Preferences = DEFAULT_PREFERENCES;
 let native: WindowsState | undefined;
 let initialized = false;
+let tutorialMode = false;
+export function setTutorialMode(enabled: boolean) { tutorialMode = enabled; if (!enabled) setPracticeSession(null); }
 let activeBefore = false;
 let sourceSession: string | null = null;
 let automaticSession: string | null = null;
@@ -88,7 +91,8 @@ export function initializeRecording() {
     void window.sargosh?.reportRecording(state).catch(() => {});
     if (state.phase === 'ready' && state.sessionId && recording.getClip()) {
       const id = state.sessionId;
-      const saved = savedHistory.capture(id, recording.getClip()!, transcription.getState().language, cleanup.getState().enabled);
+      if (tutorialMode) setPracticeSession(id);
+      const saved = tutorialMode ? Promise.resolve(true) : savedHistory.capture(id, recording.getClip()!, transcription.getState().language, cleanup.getState().enabled);
       if (transcription.getState().automatic && automaticSession !== id) {
         automaticSession = id; savingForTranscription = id; reportCloud();
         void saved.then(() => {
@@ -108,6 +112,7 @@ export function initializeRecording() {
   });
   let lastHistoryOutcome: unknown[] = [];
   const remember = () => {
+    if (tutorialMode) return;
     const audio = recording.getState(); const speech = transcription.getState(); const clean = cleanup.getState();
     if (!audio.sessionId || speech.sessionId !== audio.sessionId || speech.phase === 'idle' || speech.phase === 'working' || clean.phase === 'working') return;
     if (speech.phase === 'completed' && clean.enabled && clean.phase === 'idle' && speech.result?.text) return;
@@ -121,7 +126,7 @@ export function initializeRecording() {
   };
   const maybeDeliver = () => {
     const audio = recording.getState(); const speech = transcription.getState(); const clean = cleanup.getState();
-    if (!window.sargosh?.deliverText || audio.phase !== 'ready' || audio.mode === 'manual' || !audio.sessionId ||
+    if (tutorialMode || !window.sargosh?.deliverText || audio.phase !== 'ready' || audio.mode === 'manual' || !audio.sessionId ||
         speech.phase !== 'completed' || speech.sessionId !== audio.sessionId || !speech.result?.text ||
         native?.sessionId !== audio.sessionId || native.purpose !== 'recording' || native.phase !== 'finished' || !native.enabled) return;
     const text = clean.phase === 'completed' && clean.sessionId === audio.sessionId && clean.result ? clean.result.text :
