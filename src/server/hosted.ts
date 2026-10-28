@@ -1,4 +1,5 @@
 import { installStreaming } from './streaming';
+import { API_VERSION } from './version';
 import { createCleanupProvider, type CleanupProviderOptions } from './cleanup-provider';
 import { cleanupReservationCost, cleanupActualCost } from './cleanup-budget';
 import Fastify from 'fastify';
@@ -54,7 +55,7 @@ export function createHostedServer(options:HostedOptions){
   const userId=token?await timeRequest(request,'server.auth',()=>verify(token).catch(()=>null)):null;
   if(!userId)return reply.code(401).send({code:'AUTH_REQUIRED',message:'Sign in again to use cloud dictation.'});owners.set(request,userId);
  };
- server.get('/health',async()=>({status:'ok',service:'sargosh-api',version:'0.1.0'}));
+ server.get('/health',async()=>({status:'ok',service:'sargosh-api',version:API_VERSION}));
  server.get('/v1/readiness',async()=>({auth:true,stt:true,cleanup:true}));
  server.get('/v1/usage',{onRequest:authorized},async(request,reply)=>{
   try{return await store.snapshot(owners.get(request)!);}catch{return reply.code(503).send({code:'USAGE_UNAVAILABLE',message:'Could not load your allowance. Please try again.'});}

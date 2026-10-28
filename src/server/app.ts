@@ -1,4 +1,5 @@
 import { installStreaming } from './streaming';
+import { API_VERSION } from './version';
 import { UsageError } from './usage';
 import { createCleanupProvider } from './cleanup-provider';
 import { createHostedServer,type HostedOptions } from './hosted';
@@ -55,7 +56,7 @@ export function createServer(options: ServerOptions = {}) {
     });
   });
   server.addContentTypeParser(/^audio\/(webm|ogg|wav|mpeg|mp4)(?:\s*;.*)?$/i, { parseAs: 'buffer', bodyLimit: MAX_AUDIO_BYTES }, (_request, body, done) => done(null, body));
-  server.get('/health', async () => ({ status: 'ok', service: 'sargosh-api', version: '0.1.0' }));
+  server.get('/health', async () => ({ status: 'ok', service: 'sargosh-api', version: API_VERSION }));
   server.get('/v1/readiness', async () => ({ auth: Boolean(verifySession), stt: configured, cleanup: cleanupConfigured }));
   server.get('/v1/local-session', async (_request, reply) => {
     if (!configured && !cleanupConfigured) return reply.code(503).send({ code: 'NOT_CONFIGURED', message: 'Enable local transcription and configure the backend Deepgram key first.' });
