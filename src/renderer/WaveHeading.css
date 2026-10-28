@@ -1,0 +1,3 @@
+/* Timing is synchronized across the full heading in WaveHeading. */
+.wave-heading-word{display:inline-block;white-space:nowrap}
+.wave-heading-letter{display:inline-block}

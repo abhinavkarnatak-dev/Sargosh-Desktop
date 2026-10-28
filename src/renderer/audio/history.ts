@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { HistoryResult } from '../../shared/history';
 import type { SpeechLanguage } from '../../shared/transcription';
+import { TimingTrace } from '../../shared/timing';
 export class HistoryPersistence {
   private captures = new Map<string, Promise<boolean>>();
   private results = new Map<string, string>();
@@ -12,13 +13,14 @@ export class HistoryPersistence {
   capture(id: string, blob: Blob, language: SpeechLanguage, cleanupEnabled: boolean): Promise<boolean> {
     const pending = this.captures.get(id); if (pending) return pending;
     if (!window.sargosh) return Promise.resolve(false);
+    const timing = new TimingTrace(id, 'desktop').span('history.save', { bytes: blob.size });
     const save = (async () => {
       try {
         if (!window.sargosh?.saveHistory) throw new Error();
         const audio = await blob.arrayBuffer();
         await window.sargosh.saveHistory({ id, audio, mimeType: blob.type, language, cleanupEnabled });
-        this.update({ error: '' }); return true;
-      } catch { this.update({ error: 'Could not save this recording locally. Your current preview is still available. Check free disk space and restart Sargosh if needed.' }); return false; }
+        timing.end(); this.update({ error: '' }); return true;
+      } catch { timing.end('failed'); this.update({ error: 'Could not save this recording locally. Your current preview is still available. Check free disk space and restart Sargosh if needed.' }); return false; }
     })();
     this.captures.set(id, save); return save;
   }

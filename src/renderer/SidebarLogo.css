@@ -1,0 +1,13 @@
+/* Shared animated mark. Each placement controls its own dimensions and theme color. */
+.sidebar .brand > .sidebar-logo {
+  display: block;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  color: #000;
+}
+
+:root[data-theme='dark'] .sidebar .brand > .sidebar-logo {
+  color: #fff;
+}
+.onboarding-header>.sidebar-logo{display:block;width:43px;height:40px;flex-shrink:0;color:var(--text)}

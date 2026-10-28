@@ -1,9 +1,25 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import path from 'node:path';
 import { listPackage, extractFile } from '@electron/asar';
 const directory=path.resolve(process.argv[2] || 'out/Sargosh-win32-x64');
 const archive=path.join(directory,'resources','app.asar');
+function verifyTree(source, destination) {
+ for (const entry of readdirSync(source, {withFileTypes:true})) {
+  const file=path.join(source,entry.name);
+  if(entry.isDirectory()) verifyTree(file,path.join(destination,entry.name));
+  else {
+   let packaged;
+   try { packaged=source.startsWith('dist') ? extractFile(archive,file) : readFileSync(path.join(destination,entry.name)); }
+   catch { throw new Error('Packaged app is stale or incomplete: '+file+'. Run npm run make and wait for it to finish.'); }
+   if(!readFileSync(file).equals(packaged)) throw new Error('Packaged app does not match the current build: '+file+'. Run npm run make and wait for it to finish.');
+  }
+ }
+}
+verifyTree('dist','');
+verifyTree(path.join('helper','dist','sargosh-helper'),path.join(directory,'resources','sargosh-helper'));
+const storeBridge=path.join('native','store-updater','dist','sargosh-store-updater.exe');
+if(!existsSync(storeBridge)||!existsSync(path.join(directory,'resources','sargosh-store-updater.exe'))||!readFileSync(storeBridge).equals(readFileSync(path.join(directory,'resources','sargosh-store-updater.exe'))))throw new Error('The packaged Store updater bridge is missing or stale. Run npm run prepare:desktop and package again.');
 const files=listPackage(archive).map(file=>file.replace(/\\/g,'/'));
 for(const file of files) {
  const root=file.split('/')[1];

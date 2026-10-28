@@ -11,6 +11,19 @@ async function authCall(channel: string, value?: unknown) {
   }
 }
 const bridge: DesktopBridge = {
+  storeUpdateState:()=>ipcRenderer.invoke('sargosh:store-update-state'),
+  storeUpdateAction:action=>ipcRenderer.invoke('sargosh:store-update-action',action),
+  onStoreUpdate:listener=>{const handler=(_event:Electron.IpcRendererEvent,state:import('../shared/store-update').StoreUpdateState)=>listener(state);ipcRenderer.on('sargosh:store-update',handler);return()=>{ipcRenderer.removeListener('sargosh:store-update',handler);};},
+  startStream: request=>ipcRenderer.invoke('sargosh:stream-start',request),
+  streamChunk: (id,audio)=>ipcRenderer.invoke('sargosh:stream-chunk',{id,audio}),
+  finishStream: id=>ipcRenderer.invoke('sargosh:stream-finish',id),
+  cancelStream: id=>ipcRenderer.invoke('sargosh:stream-cancel',id),
+  reportTiming: event => ipcRenderer.invoke('sargosh:timing', event),
+  onDeliveryFirstInput: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, sessionId: string) => listener(sessionId);
+    ipcRenderer.on('sargosh:delivery-first-input', handler);
+    return () => { ipcRenderer.removeListener('sargosh:delivery-first-input', handler); };
+  },
   startupReady: () => ipcRenderer.send('sargosh:ui-ready'),
   usage: () => authCall('sargosh:usage'),
   authState: () => authCall('sargosh:auth-state'),
@@ -35,6 +48,14 @@ const bridge: DesktopBridge = {
     return () => { ipcRenderer.removeListener('sargosh:history-changed', handler); };
   },
   setWindowTheme: theme => ipcRenderer.invoke('sargosh:window-theme', theme),
+  windowTheme:()=>ipcRenderer.invoke('sargosh:window-theme-state'),
+  overlayDockState: () => ipcRenderer.invoke('sargosh:overlay-dock-state'),
+  onOverlayDock: listener => {
+    const handler = (_event: Electron.IpcRendererEvent, state: import('../shared/overlay-dock').DockState) => listener(state);
+    ipcRenderer.on('sargosh:overlay-dock', handler);
+    return () => ipcRenderer.removeListener('sargosh:overlay-dock', handler);
+  },
+  onWindowTheme:listener=>{const handler=(_event:Electron.IpcRendererEvent,theme:'light'|'dark')=>listener(theme);ipcRenderer.on('sargosh:window-theme-changed',handler);return()=>ipcRenderer.removeListener('sargosh:window-theme-changed',handler);},
   copyOverlayText: id => ipcRenderer.invoke('sargosh:overlay-copy', id),
   resizeOverlay: height => ipcRenderer.invoke('sargosh:overlay-resize', height),
   openSettings: () => ipcRenderer.invoke('sargosh:open-settings'),
@@ -92,7 +113,7 @@ const bridge: DesktopBridge = {
   preferences: update => ipcRenderer.invoke('sargosh:preferences', update),
   status: () => ipcRenderer.invoke('sargosh:status'),
   openMain: () => ipcRenderer.invoke('sargosh:open-main'),
-  moveOverlay: (dx, dy) => ipcRenderer.invoke('sargosh:move-overlay', { dx, dy }),
+  overlayDrag: (action, pill, reducedMotion) => ipcRenderer.invoke('sargosh:overlay-drag', { action, pill, reducedMotion }),
   deleteEntry: id => ipcRenderer.invoke('sargosh:delete', id)
 };
 contextBridge.exposeInMainWorld('sargosh', bridge);

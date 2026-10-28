@@ -1,20 +1,22 @@
 import { practiceSession } from './practice';
 import { transcribeViaLocalAPI } from '../../shared/local-api';
 import type { TranscriptionTransport } from './transcription';
-export const transcriptionTransport: TranscriptionTransport = async (blob, language, requestId, signal) => {
+import { TimingTrace } from '../../shared/timing';
+export const transcriptionTransport: TranscriptionTransport = async (blob, language, requestId, signal, traceId, cleanup = false) => {
   const practiceId = practiceSession();
   if (practiceId) requestId = practiceId;
-  const audio = await blob.arrayBuffer();
+  const timing = new TimingTrace(traceId ?? requestId, 'desktop', requestId);
+  const audio = await timing.measure('audio.serialize', () => blob.arrayBuffer(), { bytes: blob.size }, signal);
   if (signal.aborted) throw new Error('Transcription cancelled.');
-  if (!window.sargosh) return transcribeViaLocalAPI({ ...(practiceId ? { practice: true } : {}), requestId, audio, mimeType: blob.type, language }, signal, '/api');
+  if (!window.sargosh) return transcribeViaLocalAPI({ ...(traceId ? { traceId } : {}), ...(practiceId ? { practice: true } : {}), ...(cleanup ? { cleanup: true } : {}), requestId, audio, mimeType: blob.type, language }, signal, '/api');
   const cancel = () => { void window.sargosh!.cancelTranscription(requestId).catch(() => {}); };
   signal.addEventListener('abort', cancel, { once: true });
   try {
     if (signal.aborted) throw new Error('Transcription cancelled.');
     const send = practiceId ? window.sargosh.practiceTranscribeAudio : window.sargosh.transcribeAudio;
     if (!send) throw new Error('Restart Sargosh to use isolated practice dictation.');
-    const reply = await send({ ...(practiceId ? { practice: true } : {}), requestId, audio, mimeType: blob.type, language });
-    if (!reply.ok) throw new Error(reply.message);
+    const reply = await send({ ...(traceId ? { traceId } : {}), ...(practiceId ? { practice: true } : {}), ...(cleanup ? { cleanup: true } : {}), requestId, audio, mimeType: blob.type, language });
+    if (!reply.ok) throw Object.assign(new Error(reply.message), { code: reply.code });
     return reply.result;
   } finally { signal.removeEventListener('abort', cancel); }
 };

@@ -15,6 +15,12 @@ export function windowsOverlayProperties() {
   };
 }
 type OverlayProperties = ReturnType<typeof windowsOverlayProperties>;
+export function overlayMousePressed() {
+  if (process.platform !== 'win32') return () => true;
+  const user32 = koffi.load('user32.dll');
+  const getKeyState = user32.func('short __stdcall GetAsyncKeyState(int key)');
+  return () => (Number(getKeyState(1)) & 0x8000) !== 0;
+}
 export function enableOverlayInput(window: Pick<BrowserWindow, 'getNativeWindowHandle' | 'hookWindowMessage' | 'unhookWindowMessage' | 'once'>, properties?: OverlayProperties) {
   if (process.platform !== 'win32') return;
   const native = properties ?? windowsOverlayProperties();

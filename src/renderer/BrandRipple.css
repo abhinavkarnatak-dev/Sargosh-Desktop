@@ -1,0 +1,4 @@
+.app-frame:has(>.brand-water-ripple){position:relative}
+.brand-water-filter{position:absolute;pointer-events:none;overflow:hidden}
+.brand-water-ripple{position:absolute;inset:0;width:100%;height:100%;z-index:20;pointer-events:none;border-radius:inherit}
+@media(prefers-reduced-motion:reduce){.brand-water-ripple{display:none}}

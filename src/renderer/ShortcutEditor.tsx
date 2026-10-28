@@ -1,10 +1,13 @@
+import { NoticeToast } from './NoticeToast';
 import { shortcutLabel } from '../shared/shortcut-label';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { cloudBusy, recording } from './audio/runtime';
 import { recordingBusy } from '../shared/recording';
 import { ShortcutSession } from './shortcut-session';
 export function ShortcutEditor({ shortcut, onSave, onEditingChange }: { shortcut: string; onSave(value: string): Promise<void>; onEditingChange?(active: boolean): void }) {
+  const [notice,setNotice]=useState(0);
+  const dismissNotice=useCallback(()=>setNotice(0),[]);
   const [editing, setEditing] = useState(false); const [busy, setBusy] = useState(false);
   useEffect(() => { onEditingChange?.(editing || busy); }, [editing, busy, onEditingChange]);
   const [draft, setDraft] = useState(shortcut); const [message, setMessage] = useState('');
@@ -42,7 +45,7 @@ export function ShortcutEditor({ shortcut, onSave, onEditingChange }: { shortcut
     event.preventDefault(); event.stopPropagation();
     if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || !candidate.current || busy) return;
     const value = candidate.current; candidate.current = null; setBusy(true); setMessage('Saving shortcut...');
-    try { await session.current!.save(value); if (mounted.current) { setEditing(false); setMessage('Shortcut saved.'); } }
+    try { await session.current!.save(value); if (mounted.current) { setEditing(false); setMessage(''); setNotice(current=>current+1); } }
     catch (error) { if (mounted.current) setMessage(error instanceof Error ? error.message : 'Could not save the shortcut. Please try again.'); }
     finally { if (mounted.current) setBusy(false); }
   }
@@ -52,5 +55,5 @@ export function ShortcutEditor({ shortcut, onSave, onEditingChange }: { shortcut
       <button className="button secondary" disabled={busy} onClick={() => void change(editing)}>{busy ? 'Please wait...' : editing ? 'Cancel' : 'Change shortcut'}</button></div>
     <p id="dictation-shortcut-help" className="inline-help">{editing ? 'Press a combination, then release all keys. It saves automatically. Recording shortcuts are paused while you choose.' : 'The same shortcut works for hold-to-talk and double-tap hands-free.'}</p>
     {message && <p role="status" className="inline-help">{message}</p>}
-  </div></div>;
+  </div>{notice>0 && <NoticeToast key={notice} message="Shortcut saved." variant="success" onDismiss={dismissNotice} />}</div>;
 }

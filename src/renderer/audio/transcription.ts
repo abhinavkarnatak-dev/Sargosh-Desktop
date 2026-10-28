@@ -1,5 +1,6 @@
 import { INITIAL_TRANSCRIPTION, type SpeechLanguage, type Transcript, type TranscriptionState } from '../../shared/transcription';
-export type TranscriptionTransport = (blob: Blob, language: SpeechLanguage, requestId: string, signal: AbortSignal) => Promise<Transcript>;
+import { TimingTrace, timingErrorCode } from '../../shared/timing';
+export type TranscriptionTransport = (blob: Blob, language: SpeechLanguage, requestId: string, signal: AbortSignal, traceId?: string, cleanup?: boolean) => Promise<Transcript>;
 export class TranscriptionController {
   private state: TranscriptionState = { ...INITIAL_TRANSCRIPTION };
   private active?: AbortController;
@@ -9,12 +10,23 @@ export class TranscriptionController {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private update(value: Partial<TranscriptionState>) { this.state = { ...this.state, ...value }; for (const listener of this.listeners) listener(); }
   configure(value: { language?: SpeechLanguage; automatic?: boolean }) { if (!this.active) this.update(value); }
-  async start(sessionId: string, blob: Blob) {
+  async start(sessionId: string, blob: Blob, cleanup = false) {
     if (this.active) return;
     const abort = new AbortController(); this.active = abort;
     this.update({ phase: 'working', sessionId, result: null, message: 'Transcribing with Deepgram...' });
     try {
-      const result = await this.transport(blob, this.state.language, this.makeId(), abort.signal);
+      const requestId = this.makeId();
+      const timing = new TimingTrace(sessionId, 'desktop', requestId);
+      const span = timing.span(cleanup ? 'dictation.transport' : 'stt.transport', { bytes: blob.size }, abort.signal);
+      let result: Transcript;
+      try {
+        result = await this.transport(blob, this.state.language, requestId, abort.signal, sessionId, cleanup);
+        const failure = result.cleanup?.ok === false ? result.cleanup : null;
+        span.end(failure ? 'failed' : 'ok', { errorCode: timingErrorCode(failure?.code), model: result.cleanup?.ok ? result.cleanup.result.model : undefined, serviceTier: result.cleanup?.ok ? result.cleanup.result.serviceTier : undefined });
+      } catch (error) {
+        span.end(abort.signal.aborted ? 'cancelled' : 'failed', { errorCode: timingErrorCode((error as { code?: unknown } | null)?.code) });
+        throw error;
+      }
       if (this.active !== abort || abort.signal.aborted) return;
       this.active = undefined;
       this.update({ phase: 'completed', result, message: result.text ? 'Transcript ready.' : 'No speech was recognized. Play the clip and check the microphone or language.' });

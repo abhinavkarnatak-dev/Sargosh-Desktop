@@ -2,18 +2,20 @@ import { apiEndpoint,hostedEndpoint } from './api-endpoint';
 import { audioType, isRequestId, isSpeechLanguage, type Transcript, type TranscriptionRequest } from './transcription';
 import { MAX_CLEANUP_CHARS, isCleanupModel, type CleanupRequest, type CleanupResult } from './cleanup';
 import { MAX_AUDIO_BYTES } from './recording';
+import { TimingTrace, timingId } from './timing';
 
 export class LocalApiError extends Error {
   constructor(public code: string, message: string) { super(message); }
 }
 export async function transcribeViaLocalAPI(request: TranscriptionRequest, signal: AbortSignal, base = 'http://127.0.0.1:4318', fetcher: typeof fetch = fetch, accessToken?: string): Promise<Transcript> {
+  const timing = new TimingTrace(request.traceId ?? request.requestId, 'client', request.requestId);
   if (!isRequestId(request.requestId) || !isSpeechLanguage(request.language) || !audioType(request.mimeType) || !request.audio.byteLength || request.audio.byteLength > MAX_AUDIO_BYTES) {
     throw new LocalApiError('INVALID_REQUEST', 'The recording cannot be sent for transcription.');
   }
   if(!base.startsWith('/'))base=apiEndpoint(base);
   const remote=hostedEndpoint(base);
   if(request.practice && !remote)throw new LocalApiError('PRACTICE_UNAVAILABLE','Practice requires the hosted service.');
-  const deadline = AbortSignal.timeout(remote?180_000:75_000);
+  const deadline = AbortSignal.timeout(remote?180_000:100_000);
   const combined = AbortSignal.any([signal, deadline]);
   const read = async (response: Response) => {
     let data: unknown;
@@ -26,17 +28,26 @@ export async function transcribeViaLocalAPI(request: TranscriptionRequest, signa
     return data;
   };
   try {
-    const session = remote ? await warmHostedAPI(base,combined,fetcher,accessToken) : await read(await fetcher(base + '/v1/local-session', { signal: combined, cache: 'no-store', redirect: 'error' })) as { token?: unknown };
+    const session = await timing.measure('stt.session', async () => remote ? warmHostedAPI(base,combined,fetcher,accessToken) : read(await fetcher(base + '/v1/local-session', { signal: combined, cache: 'no-store', redirect: 'error' })) as Promise<{ token?: unknown }>, {}, combined);
     if (!remote && (typeof session.token !== 'string' || !/^[a-f0-9]{64}$/.test(session.token))) throw new LocalApiError('LOCAL_SESSION', 'Could not open a local transcription session.');
-    const result = await read(await fetcher(base + (request.practice ? '/v1/practice/transcriptions?language=' : '/v1/transcriptions?language=') + request.language, {
+    const result = await timing.measure(request.cleanup ? 'dictation.http' : 'stt.http', async () => read(await fetcher(base + (request.cleanup ? (request.practice ? '/v1/practice/dictations?language=' : '/v1/dictations?language=') : (request.practice ? '/v1/practice/transcriptions?language=' : '/v1/transcriptions?language=')) + request.language, {
       method: 'POST', signal: combined, redirect: 'error', headers: {
-        ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': request.mimeType, ...(!remote?{'x-sargosh-token': session.token as string}:{}), 'x-sargosh-request-id': request.requestId
+        ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': request.mimeType, ...(!remote?{'x-sargosh-token': session.token as string}:{}), 'x-sargosh-request-id': request.requestId,
+        ...(timingId(request.traceId) ? { 'x-sargosh-trace-id': request.traceId } : {})
       }, body: request.audio
-    })) as Partial<Transcript>;
+    })), { bytes: request.audio.byteLength, practice: !!request.practice }, combined) as Partial<Transcript>;
     if (typeof result.text !== 'string' || result.text.length > 100_000 || result.language !== request.language || result.model !== 'nova-3' ||
         typeof result.durationMs !== 'number' || !Number.isFinite(result.durationMs) || result.durationMs < 0 ||
         (result.confidence !== null && (typeof result.confidence !== 'number' || result.confidence < 0 || result.confidence > 1))) {
       throw new LocalApiError('LOCAL_API', 'The local API returned an unreadable transcript.');
+    }
+    if (request.cleanup && result.text.trim()) {
+      const clean = result.cleanup;
+      if (!clean || typeof clean !== 'object' || typeof clean.ok !== 'boolean' ||
+          (clean.ok ? !clean.result || typeof clean.result.text !== 'string' || clean.result.text.length > Math.max(512, result.text.length * (request.language === 'multi' ? 4 : 2) + 256) || !isCleanupModel(clean.result.model)
+            : typeof clean.code !== 'string' || clean.code.length > 100 || typeof clean.message !== 'string' || clean.message.length > 400)) {
+        throw new LocalApiError('LOCAL_API', 'The service returned an invalid dictation result.');
+      }
     }
     return result as Transcript;
   } catch (error) {
@@ -48,6 +59,7 @@ export async function transcribeViaLocalAPI(request: TranscriptionRequest, signa
 }
 
 export async function cleanupViaLocalAPI(request: CleanupRequest, signal: AbortSignal, base = 'http://127.0.0.1:4318', fetcher: typeof fetch = fetch, accessToken?: string): Promise<CleanupResult> {
+  const timing = new TimingTrace(request.traceId ?? request.requestId, 'client', request.requestId);
   if (!isRequestId(request.requestId) || !isSpeechLanguage(request.language) || typeof request.text !== 'string' || !request.text.trim() || request.text.length > MAX_CLEANUP_CHARS) {
     throw new LocalApiError('CLEANUP_INPUT', 'This transcript cannot be sent for cleanup. The original is available.');
   }
@@ -66,14 +78,15 @@ export async function cleanupViaLocalAPI(request: CleanupRequest, signal: AbortS
     return data;
   };
   try {
-    const session = remote ? await warmHostedAPI(base,combined,fetcher,accessToken) : await read(await fetcher(base + '/v1/local-session', { signal: combined, cache: 'no-store', redirect: 'error' })) as { token?: unknown };
+    const session = await timing.measure('cleanup.session', async () => remote ? warmHostedAPI(base,combined,fetcher,accessToken) : read(await fetcher(base + '/v1/local-session', { signal: combined, cache: 'no-store', redirect: 'error' })) as Promise<{ token?: unknown }>, {}, combined);
     if (!remote && (typeof session?.token !== 'string' || !/^[a-f0-9]{64}$/.test(session.token))) throw new LocalApiError('LOCAL_SESSION', 'Could not open a local cleanup session.');
-    const result = await read(await fetcher(base + (request.practice ? '/v1/practice/cleanup' : '/v1/cleanup'), {
+    const result = await timing.measure('cleanup.http', async () => read(await fetcher(base + (request.practice ? '/v1/practice/cleanup' : '/v1/cleanup'), {
       method: 'POST', signal: combined, redirect: 'error', headers: {
-        ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json', ...(!remote?{'x-sargosh-token': session.token as string}:{}), 'x-sargosh-request-id': request.requestId
+        ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json', ...(!remote?{'x-sargosh-token': session.token as string}:{}), 'x-sargosh-request-id': request.requestId,
+        ...(timingId(request.traceId) ? { 'x-sargosh-trace-id': request.traceId } : {})
       }, body: JSON.stringify({ text: request.text, language: request.language })
-    })) as Partial<CleanupResult>;
-    if (typeof result?.text !== 'string' || result.text.length > Math.max(512, request.text.length * 2 + 256) || !isCleanupModel(result.model)) throw new LocalApiError('LOCAL_API', 'The local API returned an invalid cleanup result.');
+    })), { characters: request.text.length, practice: !!request.practice }, combined) as Partial<CleanupResult>;
+    if (typeof result?.text !== 'string' || result.text.length > Math.max(512, request.text.length * (request.language === 'multi' ? 4 : 2) + 256) || !isCleanupModel(result.model)) throw new LocalApiError('LOCAL_API', 'The local API returned an invalid cleanup result.');
     return result as CleanupResult;
   } catch (error) {
     if (signal.aborted) throw new LocalApiError('CANCELLED', 'Cleanup cancelled.');

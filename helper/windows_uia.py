@@ -1,4 +1,4 @@
-"""Clipboard-free Windows delivery. All UIA calls belong to the worker thread."""
+"""Windows delivery with temporary clipboard paste and paced keyboard fallback."""
 import ctypes
 from ctypes import wintypes
 import os
@@ -9,6 +9,7 @@ from uuid import uuid4
 from destinations import Destination
 from windows_keyboard import INPUT_TAG
 from text_input import character_events
+from windows_clipboard import ClipboardUnavailable, paste_text
 
 
 TEST_TEXT = 'Sargosh input test.'
@@ -163,7 +164,7 @@ class UIAutomation:
     def insert_test(self, destination):
         return self.insert_text(destination, TEST_TEXT)
 
-    def insert_text(self, destination, text, cancelled=None):
+    def insert_text(self, destination, text, cancelled=None, on_first_input=None):
         def check_cancelled():
             if cancelled and cancelled.is_set():
                 raise ValueError('Insertion cancelled')
@@ -206,11 +207,33 @@ class UIAutomation:
             if self.user32.GetKeyboardLayout(thread_id) != layout:
                 raise ValueError('Keyboard layout changed during delivery')
 
-        self._send_text(text, before_character=before_character, layout=layout)
+        # Only pre-dispatch clipboard failures permit keyboard fallback. Once a
+        # paste may have reached the editor, retrying could duplicate text.
+        method, fallback = 'paste', None
+        try:
+            paste_text(text, process_id, before_character,
+                       lambda: self._send_paste(before_character), on_first_input)
+        except ClipboardUnavailable as error:
+            method = 'keyboard'
+            fallback = error
+            if on_first_input:
+                self._send_text(text, before_character=before_character, layout=layout, on_first_input=on_first_input)
+            else:
+                self._send_text(text, before_character=before_character, layout=layout)
         # Input delivery cannot prove the application's final document contents.
-        return {'status': 'sent', 'message': 'Text sent to your saved input.'}
+        result = {'status': 'sent', 'message': 'Text sent to your saved input.', 'method': method}
+        if fallback:
+            result['fallbackReason'] = fallback.reason
+            if fallback.format_id is not None:
+                result['clipboardFormat'] = fallback.format_id
+            if fallback.windows_error is not None:
+                result['windowsError'] = fallback.windows_error
+        return result
 
-    def _send_text(self, text, before_character=None, layout=None):
+    def _send_paste(self, validate):
+        self._send_text('', before_character=validate, paste=True)
+
+    def _send_text(self, text, before_character=None, layout=None, on_first_input=None, paste=False):
         class MouseInput(ctypes.Structure):
             _fields_ = [('dx', wintypes.LONG), ('dy', wintypes.LONG), ('mouseData', wintypes.DWORD),
                         ('dwFlags', wintypes.DWORD), ('time', wintypes.DWORD), ('dwExtraInfo', ctypes.c_size_t)]
@@ -234,24 +257,29 @@ class UIAutomation:
         # Some editors handle a rapid Unicode burst poorly. Pace whole characters,
         # keeping both UTF-16 surrogate units of a non-BMP character together.
         text = text.replace('\r\n', '\n').replace('\r', '\n')
-        for character_index, character in enumerate(text):
+        for character_index, character in enumerate([None] if paste else text):
             if character_index:
                 time.sleep(CHARACTER_INTERVAL_SECONDS)
             if before_character:
                 before_character()
-            mapping = self.user32.VkKeyScanExW(character, layout) if layout and ord(character) < 0x80 else -1
+            mapping = self.user32.VkKeyScanExW(character, layout) if not paste and layout and ord(character) < 0x80 else -1
             caps_lock = bool(self.user32.GetKeyState(0x14) & 1) if layout else False
-            events = character_events(character, mapping, caps_lock)
+            events = [(0x11, 0, 0), (0x56, 0, 0), (0x56, 0, 2), (0x11, 0, 2)] if paste else character_events(character, mapping, caps_lock)
             inputs = (Input * len(events))()
             for index, (key, scan, flags) in enumerate(events):
                 inputs[index].type = 1
                 inputs[index].ki = KeyboardInput(key, scan, flags, 0, INPUT_TAG)
             sent = self.user32.SendInput(len(inputs), inputs, ctypes.sizeof(Input))
+            if character_index == 0 and sent == len(inputs) and on_first_input:
+                try:
+                    on_first_input()
+                except Exception:
+                    pass  # Diagnostic delivery must never interrupt text insertion.
             if sent != len(inputs):
                 # Release only keys this partial batch left pressed. Never resend text.
                 held = []
                 for key, scan, flags in events[:max(0, min(sent, len(events)))]:
-                    if key not in (0x10, 0x0d):
+                    if key not in (0x10, 0x0d, 0x11, 0x56):
                         continue
                     if flags & 0x0002:
                         if key in held:

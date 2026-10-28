@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch, ANY
 from destinations import Destination
 from windows_uia import UIAutomation
 from windows_keyboard import INPUT_TAG
+from windows_clipboard import ClipboardUnavailable
 
 
 class Function:
@@ -60,6 +61,80 @@ def backend(element=None):
 
 
 class UIAutomationTests(unittest.TestCase):
+    def setUp(self):
+        # Existing cases exercise the conservative keyboard fallback.
+        fallback = patch('windows_uia.paste_text', side_effect=ClipboardUnavailable())
+        fallback.start()
+        self.addCleanup(fallback.stop)
+
+    def test_fast_paste_uses_saved_target_and_does_not_type_again(self):
+        element = Element(); instance = backend(element); target = instance.capture(element)
+        instance._send_text = Mock()
+        first = Mock()
+        with patch('windows_uia.paste_text') as paste:
+            result = instance.insert_text(target, 'Hello\nनमस्ते 👋', on_first_input=first)
+        self.assertEqual(result['method'], 'paste')
+        self.assertEqual(paste.call_args.args[:2], ('Hello\nनमस्ते 👋', 123))
+        self.assertIs(paste.call_args.args[4], first)
+        instance._send_text.assert_not_called()
+
+    def test_keyboard_fallback_exposes_safe_reason_and_format_without_clipboard_contents(self):
+        element = Element(); instance = backend(element); target = instance.capture(element)
+        instance._send_text = Mock()
+        with patch('windows_uia.paste_text', side_effect=ClipboardUnavailable('clipboard-format', 14)):
+            result = instance.insert_text(target, 'Private transcript')
+        self.assertEqual(result['method'], 'keyboard')
+        self.assertEqual(result['fallbackReason'], 'clipboard-format')
+        self.assertEqual(result['clipboardFormat'], 14)
+        self.assertNotIn('Private transcript', str(result))
+
+    def test_uncertain_paste_is_not_retried_as_keyboard_input(self):
+        element = Element(); instance = backend(element); target = instance.capture(element)
+        instance._send_text = Mock()
+        with patch('windows_uia.paste_text', side_effect=RuntimeError('Unconfirmed')):
+            with self.assertRaises(RuntimeError):
+                instance.insert_text(target, 'Hello')
+        instance._send_text.assert_not_called()
+
+    def test_paste_sends_one_tagged_ctrl_v_batch_and_no_enter(self):
+        instance = backend(); batches = []
+        def send(count, inputs, _size):
+            batches.append([(inputs[i].ki.wVk, inputs[i].ki.dwFlags, inputs[i].ki.dwExtraInfo) for i in range(count)])
+            return count
+        instance.user32.SendInput = Function(send)
+        validate = Mock()
+        instance._send_paste(validate)
+        validate.assert_called_once()
+        self.assertEqual(batches, [[(17, 0, INPUT_TAG), (86, 0, INPUT_TAG), (86, 2, INPUT_TAG), (17, 2, INPUT_TAG)]])
+
+    def test_partial_paste_releases_only_our_pressed_keys(self):
+        instance = backend(); releases = []
+        def send(count, inputs, _size):
+            if count == 1:
+                releases.append(inputs.contents.ki.wVk)
+                return 1
+            return 2
+        instance.user32.SendInput = Function(send)
+        with self.assertRaises(RuntimeError):
+            instance._send_paste(lambda: None)
+        self.assertEqual(releases, [86, 17])
+
+    def test_first_input_callback_runs_once_after_windows_accepts_the_first_batch(self):
+        instance = backend()
+        order = []
+        instance.user32.SendInput = Function(lambda count, *_: (order.append('send'), count)[1])
+        instance._send_text('ABC', on_first_input=lambda: order.append('first'))
+        self.assertEqual(order, ['send', 'first', 'send', 'send'])
+
+    def test_a_diagnostics_callback_failure_does_not_stop_typing(self):
+        instance = backend()
+        calls = []
+        instance.user32.SendInput = Function(lambda count, *_: (calls.append(count), count)[1])
+        def broken():
+            raise RuntimeError('diagnostics unavailable')
+        instance._send_text('ABC', on_first_input=broken)
+        self.assertEqual(len(calls), 3)
+
     def test_writable_document_is_supported_without_reading_its_text(self):
         element = Element(has_value=False, text_readonly=False)
         target = backend(element).capture(element)

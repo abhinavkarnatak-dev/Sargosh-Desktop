@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 const locks = new Map<HTMLElement, { count: number; value: string; priority: string }>();
 export function useModalDialog(ref: RefObject<HTMLDialogElement | null>) {
   useEffect(() => {
@@ -19,4 +19,19 @@ export function useModalDialog(ref: RefObject<HTMLDialogElement | null>) {
       }
     };
   }, [ref]);
+}
+
+// Keep the modal in the top layer, with scroll/focus locks, until its exit finishes.
+export function useModalDismiss(onClose: () => void) {
+  const [closing,setClosing]=useState(false);
+  const timer=useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finish=useRef(onClose);finish.current=onClose;
+  useEffect(()=>()=>{if(timer.current!==null)clearTimeout(timer.current);},[]);
+  function dismiss(){
+    if(timer.current!==null)return;
+    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){finish.current();return;}
+    setClosing(true);
+    timer.current=setTimeout(()=>{finish.current();},180);
+  }
+  return {closing,dismiss};
 }

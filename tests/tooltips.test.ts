@@ -42,3 +42,19 @@ it('clears a delayed hover when clicked before the tooltip opens',async()=>{
 it('cancels a delayed tooltip if its menu opens before the delay ends',async()=>{
  await send(new PointerEvent('pointerover',{bubbles:true}));button.setAttribute('aria-expanded','true');await advance(300);expect(tip()).toBeNull();
 });
+
+it.each([['right',456,494,216],['left',56,94,104]] as const)('positions %s-docked hints inward from the full control instead of a rotated wave',async(dock,left,right,expected)=>{
+ const stage=document.createElement('div'),control=document.createElement('div');
+ stage.className='overlay-stage';stage.dataset.dock=dock;control.className='overlay-pill';stage.append(control);document.body.append(stage);control.append(button);
+ button.removeAttribute('data-tooltip-placement');
+ vi.spyOn(control,'getBoundingClientRect').mockReturnValue({left,right,top:14,bottom:166,width:38,height:152} as DOMRect);
+ const original=HTMLElement.prototype.getBoundingClientRect;
+ const measure=vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
+  return this.getAttribute('role')==='tooltip'?{left:0,right:230,top:0,bottom:36,width:230,height:36} as DOMRect:original.call(this);
+ });
+ try{
+  await send(new PointerEvent('pointerover',{bubbles:true}));await advance(220);
+  expect(tip()?.style.left).toBe(expected+'px');
+  if(dock==='right')expect(expected+230).toBeLessThan(left);else expect(expected).toBeGreaterThan(right);
+ }finally{measure.mockRestore();document.body.append(button);stage.remove();}
+});

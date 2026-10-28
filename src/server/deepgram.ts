@@ -1,5 +1,6 @@
 import { normalizeDashes } from '../shared/lifecycle';
 import type { SpeechLanguage, Transcript } from '../shared/transcription';
+import type { ProviderMeasure } from './timing';
 
 export class SpeechError extends Error {
   constructor(public code: string, message: string, public status = 502) { super(message); }
@@ -19,7 +20,7 @@ async function boundedJSON(response: Response): Promise<unknown> {
 }
 export async function recognizeAudio(options: {
   apiKey: string; audio: Buffer; mimeType: string; language: SpeechLanguage;
-  signal: AbortSignal; fetcher?: typeof fetch;
+  signal: AbortSignal; fetcher?: typeof fetch; measure?: ProviderMeasure;
 }): Promise<Transcript> {
   const timeout = AbortSignal.timeout(60_000);
   const signal = AbortSignal.any([options.signal, timeout]);
@@ -27,11 +28,12 @@ export async function recognizeAudio(options: {
   url.searchParams.set('model', 'nova-3'); url.searchParams.set('language', options.language);
   url.searchParams.set('smart_format', 'true'); url.searchParams.set('punctuate', 'true');
   url.searchParams.set('mip_opt_out', 'true');
+  const measure: ProviderMeasure = options.measure ?? ((_stage, work) => work());
   try {
-    const response = await (options.fetcher || fetch)(url, {
+    const response = await measure('headers', () => (options.fetcher || fetch)(url, {
       method: 'POST', headers: { Authorization: 'Token ' + options.apiKey, 'Content-Type': options.mimeType },
       body: new Uint8Array(options.audio).buffer, signal, redirect: 'error'
-    });
+    }));
     if (!response.ok) {
       void response.body?.cancel().catch(() => {});
       if (response.status === 401 || response.status === 403) throw new SpeechError('PROVIDER_AUTH', 'Deepgram rejected the backend API key. Check the private .env file.', 503);
@@ -40,7 +42,7 @@ export async function recognizeAudio(options: {
       if (response.status === 400 || response.status === 415 || response.status === 422) throw new SpeechError('AUDIO_REJECTED', 'Deepgram could not read this audio. Try a new recording.', 422);
       throw new SpeechError('PROVIDER_UNAVAILABLE', 'Deepgram is temporarily unavailable. Keep the clip and try again later.');
     }
-    const data = await boundedJSON(response) as { results?: { channels?: { alternatives?: { transcript?: unknown; confidence?: unknown }[] }[] }; metadata?: { duration?: unknown } };
+    const data = await measure('body', () => boundedJSON(response)) as { results?: { channels?: { alternatives?: { transcript?: unknown; confidence?: unknown }[] }[] }; metadata?: { duration?: unknown } };
     const alternative = data?.results?.channels?.[0]?.alternatives?.[0];
     if (!alternative || typeof alternative.transcript !== 'string' || alternative.transcript.length > 100_000) throw new SpeechError('INVALID_RESPONSE', 'Deepgram returned an unreadable transcript.');
     const duration = data.metadata?.duration;

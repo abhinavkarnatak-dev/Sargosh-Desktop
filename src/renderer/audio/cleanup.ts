@@ -1,6 +1,7 @@
 import { INITIAL_CLEANUP, MAX_CLEANUP_CHARS, type CleanupResult, type CleanupState } from '../../shared/cleanup';
 import type { SpeechLanguage } from '../../shared/transcription';
-export type CleanupTransport = (text: string, language: SpeechLanguage, requestId: string, signal: AbortSignal) => Promise<CleanupResult>;
+import { TimingTrace } from '../../shared/timing';
+export type CleanupTransport = (text: string, language: SpeechLanguage, requestId: string, signal: AbortSignal, traceId?: string) => Promise<CleanupResult>;
 export class CleanupController {
   private state: CleanupState = { ...INITIAL_CLEANUP };
   private active?: AbortController;
@@ -15,9 +16,11 @@ export class CleanupController {
     if (!text.trim()) { this.clear(); return; }
     if (text.length > MAX_CLEANUP_CHARS) { this.update({ phase: 'failed', sessionId, result: null, message: 'This transcript exceeds the cleanup limit. The original transcript is available.' }); return; }
     const abort = new AbortController(); this.active = abort;
-    this.update({ phase: 'working', sessionId, result: null, message: 'Cleaning the transcript with Gemini...' });
+    this.update({ phase: 'working', sessionId, result: null, message: 'Preparing your text...' });
     try {
-      const result = await this.transport(text, language, this.makeId(), abort.signal);
+      const requestId = this.makeId();
+      const timing = new TimingTrace(sessionId, 'desktop', requestId);
+      const result = await timing.measure('cleanup.transport', () => this.transport(text, language, requestId, abort.signal, sessionId), { characters: text.length }, abort.signal);
       if (this.active !== abort || abort.signal.aborted) return;
       this.active = undefined;
       this.update({ phase: 'completed', result, message: result.text ? 'Cleanup ready. Review the result against the original transcript.' : 'Cleanup removed all text. The original transcript is still available.' });
@@ -26,6 +29,11 @@ export class CleanupController {
       this.active = undefined;
       this.update({ phase: abort.signal.aborted ? 'cancelled' : 'failed', message: error instanceof Error ? error.message : 'Cleanup failed. The original transcript is available.' });
     }
+  }
+  accept(sessionId: string, outcome: import('../../shared/transcription').DictationCleanup) {
+    if (this.active) return;
+    this.update({ sessionId, result: outcome.ok ? outcome.result : null, phase: outcome.ok ? 'completed' : 'failed',
+      message: outcome.ok ? 'Text ready.' : outcome.message });
   }
   cancel() {
     if (!this.active) return;

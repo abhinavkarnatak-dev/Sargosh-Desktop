@@ -1,3 +1,6 @@
+import { WaveHeading } from './WaveHeading';
+import { BrandRipple } from './BrandRipple';
+import { SidebarLogo } from './SidebarLogo';
 import { StartupReady } from './StartupReady';
 import { useAuth } from './auth';
 import { SignIn } from './SignIn';
@@ -5,7 +8,6 @@ import { hasProfileName, type AccountUser } from '../shared/auth';
 import { ProfileSetup } from './ProfileSetup';
 import { NoticeToast } from './NoticeToast';
 import { HistoryList } from './HistoryList';
-import { ThemeMenu } from './ThemeMenu';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BarChart3, Gauge, Mic, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react';
 import { EMPTY_SNAPSHOT, type Preferences, type Snapshot } from '../shared/types';
@@ -17,6 +19,7 @@ import { Insights } from './Insights';
 import { UsagePanel } from './UsagePanel';
 import { RollingNumber } from './RollingNumber';
 import { SettingsDialog } from './SettingsDialog';
+import { StoreUpdateControl } from './StoreUpdateControl';
 
 export function App() {
   const auth = useAuth();
@@ -64,15 +67,15 @@ function Workspace({ account }: { account: AccountUser | null }) {
   }
   useEffect(() => { setRecordingPreferences(snapshot.preferences); }, [snapshot.preferences]);
   const collapsed = snapshot.preferences.collapsed;
-  return <div className="app-frame"><StartupReady ready={snapshotReady} />
-    <header className="desktop-titlebar" aria-label="Window title bar"><button className="icon-button sidebar-toggle" data-tooltip-placement="bottom" aria-expanded={!collapsed} aria-controls="sargosh-sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => void savePreferences({ collapsed: !collapsed })}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button><ThemeMenu theme={snapshot.preferences.theme} onChange={theme => void savePreferences({ theme })} /></header>
+  return <div className="app-frame"><BrandRipple /><StartupReady ready={snapshotReady} />
+    <header className="desktop-titlebar" aria-label="Window title bar"><button className="icon-button sidebar-toggle" data-tooltip-placement="bottom" aria-expanded={!collapsed} aria-controls="sargosh-sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => void savePreferences({ collapsed: !collapsed })}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button></header>
     <div className={collapsed ? 'app-shell collapsed' : 'app-shell'}>
     <aside className="sidebar" id="sargosh-sidebar">
       <div className="sidebar-top">
 
         <a className="brand" href="#" aria-label="Sargosh home" onClick={event => { event.preventDefault(); setPage('dictation'); }}>
-          <img className="brand-dark" src="./brand/logo-dark.png" alt="" /><img className="brand-light" src="./brand/logo-light.png" alt="" />
-          <span className="sidebar-label">Sargosh<span className="brand-caption">A little less typing.</span></span>
+          <SidebarLogo />
+          <span className="sidebar-label"><span className="brand-wordmark">sargosh<span className="brand-period">.</span></span><span className="brand-caption">A little less typing.</span></span>
         </a>
         <nav aria-label="Main navigation">
           <button aria-label="Dictation" data-tooltip={collapsed ? 'Dictation' : ''} data-tooltip-placement="right" className={page === 'dictation' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('dictation')}><Mic size={19} /><span className="sidebar-label">Dictation</span></button>
@@ -81,6 +84,7 @@ function Workspace({ account }: { account: AccountUser | null }) {
         </nav>
       </div>
       <div className="sidebar-bottom">
+        <StoreUpdateControl collapsed={collapsed} allowPrompt={!settings&&!account?.onboardingRequired}/>
         <button aria-label="Settings" data-tooltip={collapsed ? 'Settings' : ''} data-tooltip-placement="right" className="nav-item" onClick={() => setSettings(true)}><Settings size={19} /><span className="sidebar-label">Settings</span></button>
       </div>
     </aside>
@@ -88,18 +92,18 @@ function Workspace({ account }: { account: AccountUser | null }) {
       <div className="main-scroll" tabIndex={0} aria-label="Page content">
       <div className="page-content">
         {page === 'dictation' ? <>
-          <div className="page-heading"><div><p className="eyebrow">DICTATION</p><h1>{account?.firstName ? 'Welcome back, ' + account.firstName : 'Welcome to Sargosh'}</h1><p className="subtitle">Speak naturally. Make room for your thoughts.</p></div></div>
+          <div className="page-heading"><div><p className="eyebrow">DICTATION</p><WaveHeading>{account?.firstName ? 'Welcome back, ' + account.firstName : 'Welcome to Sargosh'}</WaveHeading><p className="subtitle">Speak naturally. Make room for your thoughts.</p></div></div>
           <div className="dictation-overview">
             <DictationGuide preferences={snapshot.preferences} enabled={snapshotReady && !account?.onboardingRequired} />
             <aside className="dictation-summary" aria-label="Dictation statistics">
               <p className="eyebrow">YOUR ACTIVITY</p>
-              <div className="dictation-summary-metric"><span className="stat-number"><RollingNumber value={snapshot.totalWords} /></span><span className="stat-label">words dictated</span></div>
+              <div className="dictation-summary-metric"><span className="stat-number"><RollingNumber value={snapshot.totalWords} compact /></span><span className="stat-label">words dictated</span></div>
               <div className="dictation-summary-metric"><span className="stat-number"><RollingNumber value={wordsPerMinute(snapshot.totalWords, snapshot.totalDurationMs)} /><small>wpm</small></span><span className="stat-label">average speaking pace</span></div>
             </aside>
           </div>
           <HistoryList onNotice={setNotice} />
         </> : page === 'insights' ? <Insights snapshot={snapshot} /> : <>
-          <div className="page-heading"><div><p className="eyebrow">USAGE</p><h1>Your dictation allowance</h1><p className="subtitle">See how much time you have left and when it resets.</p></div></div>
+          <div className="page-heading"><div><p className="eyebrow">USAGE</p><WaveHeading>Your dictation allowance</WaveHeading><p className="subtitle">See how much time you have left and when it resets.</p></div></div>
           <UsagePanel />
         </>}
         <footer className="page-footer"><span>Speak freely. Stay in your flow.</span><span>SARGOSH</span></footer>

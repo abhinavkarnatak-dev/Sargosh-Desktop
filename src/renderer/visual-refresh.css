@@ -1,0 +1,214 @@
+/* Sargosh / Voice studio. An isolated visual layer; no copy or behaviour changes. */
+:root:not([data-surface=overlay]) {
+  --background:#eeeee6; --surface:#fbfcf5; --panel:#edeee5; --panel-hover:#e4e8dc;
+  --text:#233327; --muted:#687461; --border:#d6dccd; --accent:#375b3b;
+  --accent-soft:#e2ead9; --shadow:0 24px 80px #2333271f;
+  --studio-glow:#72955d1c; --studio-hero:#e5eadc; --studio-line:#72955d38;
+  --studio-ink:#1c2d1d; --studio-paper:#fffef7;
+}
+:root[data-theme=dark]:not([data-surface=overlay]) {
+  --background:#111813; --surface:#151e17; --panel:#19231b; --panel-hover:#202c22;
+  --text:#edf0e8; --muted:#a5afa3; --border:#2b392d; --accent:#bbd5a5;
+  --accent-soft:#293b25; --shadow:0 24px 80px #050d0759;
+  --studio-glow:#bbd5a512; --studio-hero:#21301f; --studio-line:#bbd5a52e;
+  --studio-ink:#1c2d1d; --studio-paper:#edf0e8;
+}
+/* An open workspace and a compact navigation dock. The native title-bar area stays intact. */
+.app-frame{background:radial-gradient(ellipse at 15% 0,var(--studio-glow),transparent 48%),var(--background)}
+.desktop-titlebar{background:transparent;height:48px;padding-left:25px}
+.desktop-titlebar .icon-button,.desktop-titlebar .themed-select-trigger{border-radius:9px}
+.app-frame>.app-shell{grid-template-columns:204px minmax(0,1fr);padding:0 18px 18px 12px;gap:8px;transition:grid-template-columns .24s cubic-bezier(.2,.8,.2,1)}
+.app-frame>.app-shell.collapsed{grid-template-columns:72px minmax(0,1fr)}
+.app-frame .sidebar{padding:16px 10px 12px;top:48px;height:calc(100dvh - 76px)}
+.sidebar .brand{height:54px;gap:8px;margin:0 2px 42px;overflow:hidden}
+.sidebar .brand-wordmark{font-size:27px;letter-spacing:-1.5px}
+.sidebar .brand-caption{font-size:10px;letter-spacing:.15px;color:var(--muted);margin-top:5px}
+.sidebar .brand>.sidebar-logo{width:38px;height:38px;flex-basis:38px;color:var(--text)}
+.sidebar nav{display:flex;flex-direction:column;gap:8px}
+.sidebar .nav-item{position:relative;padding:12px;height:46px;border-radius:11px;gap:12px;margin:0;font-size:12px;font-weight:500;color:var(--muted);border:1px solid transparent;transition:background .2s,color .2s,border-color .2s}
+.sidebar .nav-item>svg{width:19px;height:19px;stroke-width:1.5}
+.sidebar .nav-item:hover{background:color-mix(in srgb,var(--panel-hover) 60%,transparent);color:var(--text)}
+.sidebar .nav-item.active{background:var(--surface);color:var(--text);border-color:var(--border);box-shadow:0 4px 14px #00000006}
+.sidebar .nav-item.active>svg{color:var(--accent)}
+.sidebar .nav-item.active:after{content:'';position:absolute;right:12px;width:4px;height:4px;border-radius:50%;background:var(--accent)}
+.collapsed .sidebar .nav-item.active:after{display:none}
+.sidebar-bottom{border:0;padding-top:18px}
+.sidebar-bottom .nav-item{border-top:1px solid var(--border);border-radius:0;padding-top:20px;height:58px}
+.app-frame .main-surface{border-radius:19px;border:1px solid var(--border);background:var(--surface);min-height:0;box-shadow:0 12px 45px #00000006}
+.main-scroll{scroll-padding-top:36px}
+.page-content{max-width:1190px;padding:42px 48px 0}
+.page-heading{margin:0 0 32px;padding-bottom:27px;border-bottom:1px solid var(--border)}
+.page-heading .eyebrow{display:flex;align-items:center;gap:9px;color:var(--accent);font-size:9px;letter-spacing:2.4px}
+.page-heading .eyebrow:before{content:'';width:19px;height:1px;background:currentColor}
+.page-heading h1{font-family:Georgia,'Times New Roman',serif;font-weight:400;letter-spacing:-1.4px;font-size:38px;line-height:1.25;margin:13px 0 9px}
+.page-heading .subtitle{font-size:12px;color:var(--muted);letter-spacing:.1px}
+/* A broad sound-field panel, with activity beneath it rather than a second card. */
+.dictation-overview{display:grid;grid-template-columns:1fr;margin:0 0 34px;border:0;border-radius:0;background:transparent;overflow:visible}
+.dictation-guide{position:relative;isolation:isolate;overflow:hidden;padding:29px 34px 27px;border-radius:16px;border:1px solid var(--border);background:linear-gradient(115deg,var(--studio-hero),var(--panel) 80%)}
+.dictation-guide:after{content:'';position:absolute;z-index:-1;width:340px;height:340px;right:-90px;top:-80px;border-radius:50%;background:repeating-radial-gradient(ellipse at center,transparent calc(var(--studio-ring-phase) - 42px) calc(var(--studio-ring-phase) - 21px),var(--studio-line) calc(var(--studio-ring-phase) - 20px) calc(var(--studio-ring-phase) - 19px),transparent calc(var(--studio-ring-phase) - 18px) var(--studio-ring-phase));transform:rotate(-18deg) scaleX(.8);opacity:.75;pointer-events:none;animation:studio-ring-flow 6s linear infinite}
+.dictation-guide:after{mask-image:radial-gradient(closest-side,#000 60%,transparent 100%)}
+.dictation-guide:before{content:'';position:absolute;z-index:-1;inset:0;background:linear-gradient(90deg,transparent 55%,var(--studio-glow));pointer-events:none}
+.dictation-guide>.eyebrow{font-size:9px;color:var(--muted);letter-spacing:2px;margin-bottom:17px}
+.dictation-guide h2{font-family:Georgia,'Times New Roman',serif;font-size:34px;letter-spacing:-1px;font-weight:400;line-height:1.65;margin-bottom:11px}
+.dictation-keyboard{vertical-align:middle}
+.dictation-keyboard kbd{background:var(--surface);color:var(--text);border:1px solid color-mix(in srgb,var(--accent) 40%,var(--border));border-bottom-width:3px;border-radius:8px;font-family:'Segoe UI',sans-serif;font-size:17px;font-weight:600;min-width:38px;padding:5px 11px;box-shadow:0 3px 9px #0000000a}
+.shortcut-plus{color:var(--muted);font-size:13px}
+.dictation-guide-description{max-width:470px;font-size:12px;line-height:1.8}
+.dictation-guide-hint{font-size:10px;margin-top:20px;padding-top:17px;border-top:1px solid color-mix(in srgb,var(--border) 70%,transparent);max-width:470px}
+.dictation-summary{display:flex;flex-direction:row;justify-content:flex-start;align-items:center;gap:36px;padding:22px 8px 4px;border:0;background:transparent}
+.dictation-summary>.eyebrow{display:block;margin-right:auto;font-size:9px;color:var(--muted);letter-spacing:1.9px}
+.dictation-summary-metric{display:flex;align-items:center;gap:12px}
+.dictation-summary-metric+.dictation-summary-metric{padding-left:30px;border-left:1px solid var(--border)}
+.dictation-summary .stat-number{font-family:Georgia,serif;font-size:27px;letter-spacing:-1px;font-weight:400;color:var(--text)}
+.dictation-summary .stat-label{font-size:10px;line-height:1.6;max-width:80px;margin:0}
+.dictation-summary .stat-number small{font-size:11px}
+/* Keep the current typography with the original grouped table structure. */
+.history-section{margin-top:0;margin-bottom:36px}
+.section-heading{margin-bottom:24px}
+.section-heading h2{font-size:15px;letter-spacing:-.2px;font-weight:600}
+.history-day{margin-top:21px}
+.history-day>h3{font-size:9px;letter-spacing:1.8px;margin-bottom:12px;display:flex;align-items:center;gap:13px}
+.history-day>h3:after{content:'';height:1px;flex:1;background:var(--border);opacity:.6}
+.dictation-list{border:1px solid var(--border);border-radius:14px;background:transparent;overflow:hidden}
+.dictation-row{position:relative;grid-template-columns:74px minmax(0,1fr) 102px;gap:16px;padding:18px 20px;border-bottom:1px solid var(--border);border-radius:0}
+.dictation-row:hover,.dictation-row.active{background:color-mix(in srgb,var(--panel) 65%,transparent)}
+.dictation-row time{padding:3px 10px 0 0;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.dictation-row-text{padding-left:0;border-left:0}
+.dictation-row-text p{font-size:13px;line-height:1.85}
+.dictation-row-text>span{font-size:10px;line-height:1.6;color:var(--muted)}
+.dictation-row-actions .icon-button{width:29px;height:29px;border-radius:8px}
+.dictation-row-actions .icon-button:hover:not(:disabled){background:var(--accent-soft);color:var(--accent)}
+.empty-history{min-height:240px;border:1px dashed var(--border);border-radius:15px;background:linear-gradient(150deg,var(--panel),transparent);margin-top:10px}
+.empty-icon{border-radius:50%;width:52px;height:52px;background:var(--surface);color:var(--accent);border:1px solid var(--border)}
+.empty-history h3{font-family:Georgia,serif;font-size:24px;font-weight:400;letter-spacing:-.5px}
+.empty-history p{font-size:12px}
+.page-footer{margin-top:24px;padding:20px 0 24px;border-color:var(--border);font-size:9px;opacity:.85}
+.page-footer>span:last-child{letter-spacing:3px;font-size:8px}
+/* Insights: instrument-like figures and a single quiet calendar surface. */
+.insight-cards{gap:0;background:var(--panel);border:1px solid var(--border);border-radius:16px;margin:0 0 26px;overflow:hidden}
+.metric-card{position:relative;display:grid;grid-template-columns:1fr auto;gap:0;background:transparent;border:0;border-radius:0;padding:25px 26px}
+.metric-card+.metric-card{border-left:1px solid var(--border)}
+.metric-card>svg{grid-column:2;grid-row:1;margin:0;color:var(--accent);opacity:.9}
+.metric-card>strong{grid-column:1;grid-row:1;font-family:Georgia,serif;font-size:45px;font-weight:400;letter-spacing:-2px;line-height:1.1}
+.metric-card>.eyebrow{grid-column:1/-1;margin-top:15px;font-size:8px;letter-spacing:1.7px}
+.metric-card>p{grid-column:1/-1;font-size:10px;margin-top:9px}
+.activity-card{padding:28px 30px;border-radius:16px;background:transparent;border-color:var(--border)}
+.activity-title h2{font-family:Georgia,serif;font-size:29px;font-weight:400;margin-top:8px}
+.activity-title .eyebrow{font-size:8px;letter-spacing:2px;color:var(--accent)}
+.longest{background:var(--panel);padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:10px}
+.calendar-controls{border-top:1px solid var(--border);padding-top:16px;margin-top:22px;font-size:10px}
+.calendar-scroll{padding-top:6px}
+.day-cell{border-radius:3px;box-shadow:inset 0 0 0 1px #ffffff03}
+.level-0{background:var(--panel-hover)}
+.level-1{background:color-mix(in srgb,var(--accent) 28%,var(--panel))}
+.level-2{background:color-mix(in srgb,var(--accent) 48%,var(--panel))}
+.level-3{background:color-mix(in srgb,var(--accent) 74%,var(--panel))}
+.level-4{background:var(--accent)}
+.calendar-bottom{border-top:1px solid var(--border);padding-top:19px;font-size:9px}
+.insight-empty{font-size:11px;line-height:1.8}
+/* Allowance has its own clean, spacious readout. */
+.usage-panel{padding:28px 30px;margin:0 0 34px;background:var(--panel);border-radius:16px;border-color:var(--border)}
+.usage-heading{border-bottom:1px solid var(--border);padding-bottom:19px;margin-bottom:23px}
+.usage-heading h3{font-size:15px;letter-spacing:-.2px}
+.usage-grid{gap:32px}
+.usage-grid>div+div{padding-left:28px;border-left:1px solid var(--border)}
+.usage-grid strong{font-family:Georgia,serif;font-size:31px;letter-spacing:-1px;font-weight:400;margin:12px 0 20px}
+.usage-grid progress{height:7px;margin-bottom:14px}
+.usage-grid small{font-size:10px;line-height:1.9}
+/* Settings retain their exact controls, with a less boxed-in hierarchy. */
+.settings-dialog{width:min(920px,calc(100vw - 64px));border-radius:20px;border-color:var(--border);box-shadow:0 30px 100px #0005}
+.settings-dialog::backdrop,.history-delete-dialog::backdrop,.onboarding-dialog::backdrop{background:#0710178c;backdrop-filter:blur(7px)}
+.settings-layout{grid-template-columns:184px minmax(0,1fr);min-height:min(620px,calc(100dvh - 64px))}
+.settings-sidebar{padding:30px 15px 20px;background:var(--background);border-color:var(--border)}
+.settings-sidebar>.eyebrow{color:var(--accent);font-size:8px;letter-spacing:2px;padding-bottom:21px}
+.settings-sidebar .nav-item{font-size:11px;border-radius:9px;padding:11px 12px;margin-bottom:7px}
+.settings-sidebar .nav-item.active{background:var(--surface);box-shadow:0 2px 7px #00000006}
+.settings-version{font-size:9px;letter-spacing:.7px;text-align:center}
+.settings-content{padding:40px 32px 30px}
+.settings-content>h2{font-family:Georgia,serif;font-weight:400;font-size:34px;letter-spacing:-1px}
+.settings-content>.eyebrow{font-size:8px;letter-spacing:2px;color:var(--accent)}
+.settings-content>.subtitle{font-size:11px;margin-bottom:30px}
+.settings-card{padding:0 19px;border-radius:12px;background:var(--panel);border-color:var(--border)}
+.setting-row{padding:20px 0;border-color:var(--border);gap:18px}
+.setting-row strong{font-size:12px;font-weight:500}
+.setting-row p{font-size:10px;line-height:1.8;margin-top:6px}
+.inline-detail{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:17px;font-size:11px}
+.themed-select-trigger{border-radius:9px;background:var(--surface);border-color:var(--border);padding:10px 12px;font-size:11px}
+.themed-select-menu{border-radius:12px;padding:6px;background:var(--surface);box-shadow:0 14px 44px #0003}
+.themed-select-option{padding:9px 11px;font-size:11px;border-radius:7px;min-height:36px}
+.themed-select-option.active{background:var(--panel)}
+.themed-select-option[aria-selected=true]{background:var(--accent-soft);color:var(--accent)}
+.theme-picker{padding:4px;border-radius:9px;background:var(--surface);border-color:var(--border)}
+.theme-picker button{border-radius:6px;padding:8px 9px;gap:6px;font-size:10px}
+.theme-picker button.selected{background:var(--accent-soft);color:var(--accent)}
+.button{border-radius:9px;min-height:37px;padding:10px 15px;font-size:11px;letter-spacing:.1px;font-weight:600;background:var(--accent);color:var(--studio-ink)}
+:root:not([data-theme=dark]) .button:not(.secondary):not(.danger):not(.sign-in-google){color:#fffdf8}
+.button.secondary{border:1px solid var(--border);background:var(--panel-hover);color:var(--text);box-shadow:0 1px 2px #00000004}
+.button.danger{background:#a34b40;color:#fff}
+.text-button{font-size:11px;font-weight:500;letter-spacing:.1px}
+.microphone-test{padding:19px;border-radius:12px;background:var(--surface);border-color:var(--border)}
+.mic-test-header strong{font-size:12px;font-weight:500}
+.meter{height:5px;border-radius:5px;background:var(--panel-hover)}
+.meter>span{background:var(--accent);border-radius:5px}
+.account-form input,.sign-in-card input{border-radius:9px;border-color:var(--border);background:var(--surface);padding:12px 13px;font-size:12px}
+.account-form .avatar{background:var(--accent-soft);color:var(--accent);border:1px solid var(--border)}
+.account-actions{gap:9px;margin-top:24px}
+.privacy-footnote{font-size:10px;line-height:1.9;color:var(--muted)}
+/* Focused dialogs and onboarding. No changes to their dismissal or scroll handling. */
+.history-delete-dialog{padding:30px;width:min(460px,calc(100vw - 44px));background:var(--surface);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow)}
+.history-delete-dialog h2{font-family:Georgia,serif;font-weight:400;font-size:28px;letter-spacing:-.7px;margin-bottom:16px}
+.history-delete-dialog>p{font-size:12px;line-height:1.85;color:var(--muted)}
+.history-delete-close{right:15px;top:15px;border-radius:50%}
+.dialog-actions{padding-top:20px;border-top:1px solid var(--border);margin-top:25px;gap:10px}
+.account-delete-confirm{font-size:11px}
+.onboarding-dialog{width:min(710px,calc(100vw - 44px));padding:29px 32px;border-radius:20px;border-color:var(--border)}
+.onboarding-header{padding-bottom:19px;border-bottom:1px solid var(--border);color:var(--accent)}
+.onboarding-header>span{font-size:9px;letter-spacing:2px}
+.onboarding-steps{padding:20px 0 24px;gap:12px}
+.onboarding-steps li{font-size:10px;color:var(--muted)}
+.onboarding-steps li>span{border-radius:8px;border:1px solid var(--border);background:var(--panel)}
+.onboarding-steps li.reached>span{color:var(--accent);background:var(--accent-soft);border-color:var(--accent)}
+.onboarding-body h2{font-family:Georgia,serif;font-weight:400;font-size:32px;letter-spacing:-.8px}
+.onboarding-body>.subtitle{font-size:12px;line-height:1.85;margin-top:12px}
+.onboarding-example{font-family:Georgia,serif;font-size:20px;line-height:1.55;padding:22px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;background:var(--panel)}
+.onboarding-footer{padding-top:23px;border-color:var(--border)}
+/* Sign-in becomes a floating studio pass with a quiet abstract sound field. */
+.sign-in-screen{position:relative;isolation:isolate;background:radial-gradient(ellipse at 18% 18%,var(--studio-glow),transparent 50%),var(--background)}
+.sign-in-screen:before{content:'';position:fixed;z-index:-1;pointer-events:none;left:-200px;bottom:-250px;width:740px;height:740px;border-radius:50%;background:repeating-radial-gradient(ellipse at center,transparent calc(var(--auth-ring-phase) - 100px) calc(var(--auth-ring-phase) - 35px),var(--studio-line) calc(var(--auth-ring-phase) - 34px) calc(var(--auth-ring-phase) - 33px),transparent calc(var(--auth-ring-phase) - 32px) var(--auth-ring-phase));mask-image:radial-gradient(closest-side,#000 60%,transparent 100%);opacity:.6;animation:auth-ring-flow 14s linear infinite}
+.sign-in-card{width:min(100%,440px);padding:31px 33px 30px;background:var(--surface);border:1px solid var(--border);border-radius:22px;box-shadow:0 30px 100px #00000013;text-align:center}
+.sign-in-animated-logo{width:79px;height:68px;margin:0 auto 20px}
+.sign-in-card>img{width:79px;height:68px;margin:0 auto 20px}
+.sign-in-card h1{font-family:Georgia,serif;font-size:31px;font-weight:400;letter-spacing:-.9px;line-height:1.2}
+.sign-in-card>.subtitle{font-size:11px;line-height:1.8;margin-top:12px;margin-bottom:25px}
+.sign-in-card label{font-size:10px;letter-spacing:.25px;margin-bottom:9px}
+.sign-in-card .sign-in-google-area{height:43px}
+.sign-in-card .sign-in-google-area .sign-in-google{border-radius:9px;font-size:11px;background:var(--panel);color:var(--text);border-color:var(--border)}
+.sign-in-card .sign-in-google-area:not([data-pending=true]) .sign-in-google:hover:not(:disabled){background:var(--panel-hover);border-color:var(--accent)}
+.sign-in-card .sign-in-google-cancel{top:6px;right:6px}
+.sign-in-divider{font-size:10px;gap:15px;margin:23px 0}
+.sign-in-card form>.button{margin-top:20px;min-height:40px}
+.sign-in-card .otp-digit{height:48px;border-radius:8px;background:var(--panel);font-size:21px;border-color:var(--border)}
+.sign-in-card .otp-native-input{padding:0}
+.otp-digits{gap:8px}
+.sign-in-message{line-height:1.8;font-size:11px}
+.sign-in-secondary{margin-top:18px}
+.sign-in-secondary .text-button,.otp-resend-countdown{font-size:10px}
+.sign-in-card .inline-help{font-size:10px;line-height:1.8}
+/* Keep notifications out of layout flow and in the established viewport corner. */
+.toast{width:fit-content;max-width:calc(100vw - 48px);padding:13px 17px;background:var(--text);color:var(--surface);border:1px solid color-mix(in srgb,var(--border) 40%,transparent);border-radius:12px;box-shadow:0 10px 40px #0002;font-size:12px;right:24px;bottom:24px;left:auto}
+.custom-tooltip,.floating-day-tooltip{border-radius:8px;padding:9px 12px;font-size:11px;box-shadow:0 6px 20px #0002}
+.error-message,.danger-text{color:#dc897a}
+:root:not([data-theme=dark]) .error-message,:root:not([data-theme=dark]) .danger-text{color:#a54639}
+/* Scale without crowding controls or moving native window buttons. */
+@media(min-width:1450px){.page-content{padding-top:48px;padding-left:58px;padding-right:58px}.dictation-guide{padding:34px 40px}.dictation-guide h2{font-size:38px}}
+@media(max-width:1080px){.app-frame>.app-shell{grid-template-columns:186px minmax(0,1fr);padding-right:12px}.page-content{padding:32px 30px 0}.sidebar .brand-wordmark{font-size:24px}.dictation-guide h2{font-size:30px}.dictation-summary{gap:20px}.dictation-summary-metric+.dictation-summary-metric{padding-left:20px}.metric-card{padding:22px 20px}.metric-card>strong{font-size:38px}}
+@media(max-width:800px){.page-heading h1{font-size:32px}.dictation-summary{gap:24px}.dictation-summary>.eyebrow{display:none}.dictation-guide{padding:25px}.dictation-guide h2{font-size:28px}.metric-card{padding:20px 15px}.metric-card>strong{font-size:34px}.metric-card>svg{width:17px}.activity-card{padding:22px}.usage-grid>div+div{padding-left:0;border-left:0;border-top:1px solid var(--border);padding-top:23px}.settings-dialog{width:calc(100vw - 38px)}.settings-layout{grid-template-columns:160px minmax(0,1fr)}.settings-content{padding:36px 24px 25px}.theme-picker button{padding:8px 6px}.setting-row{gap:12px}}
+@media(max-width:650px){.app-frame>.app-shell{grid-template-columns:64px minmax(0,1fr);gap:0;padding-left:5px;padding-right:7px;padding-bottom:8px}.app-frame>.app-shell.collapsed{grid-template-columns:64px minmax(0,1fr)}.app-frame .sidebar{padding:13px 6px 8px}.sidebar .brand{margin:0 0 35px;gap:9px}.sidebar .brand>.sidebar-logo{width:34px;height:34px;flex-basis:34px}.sidebar .sidebar-label{display:none}.sidebar .nav-item{padding:11px;height:44px}.sidebar .nav-item.active:after{display:none}.page-content{padding:27px 22px 0}.page-heading{padding-bottom:22px;margin-bottom:25px}.page-heading h1{font-size:29px}.dictation-guide{padding:23px 21px}.dictation-guide h2{font-size:25px}.dictation-keyboard kbd{font-size:14px;padding:4px 7px;min-width:28px}.dictation-guide-description{font-size:11px}.dictation-guide-hint{font-size:9px}.dictation-summary{gap:17px;padding:19px 2px 2px}.dictation-summary-metric{gap:8px}.dictation-summary .stat-number{font-size:23px}.dictation-summary .stat-label{font-size:9px;max-width:65px}.dictation-summary-metric+.dictation-summary-metric{padding-left:16px}.dictation-row{grid-template-columns:51px minmax(0,1fr);gap:10px;padding:15px 0}.dictation-row-text{padding-left:12px}.dictation-row-text p{font-size:12px}.dictation-row-actions{grid-column:2;opacity:1;pointer-events:auto;justify-content:flex-end}.insight-cards{grid-template-columns:1fr}.metric-card{grid-template-columns:1fr auto;padding:21px}.metric-card+.metric-card{border-left:0;border-top:1px solid var(--border)}.metric-card>strong{font-size:39px}.metric-card>.eyebrow{margin-top:10px}.activity-card{padding:20px 16px}.activity-title{gap:15px}.longest{font-size:9px;padding:7px 9px}.usage-panel{padding:22px}.settings-layout{grid-template-columns:130px minmax(0,1fr)}.settings-sidebar{padding:27px 9px 17px}.settings-sidebar .nav-item{padding:10px 9px;font-size:10px;gap:7px}.settings-content{padding:35px 19px 24px}.setting-row{align-items:flex-start;flex-wrap:wrap}.theme-picker{margin-left:auto}.account-form input{max-width:100%}.onboarding-dialog{padding:23px}.sign-in-card{padding:28px 23px}.onboarding-body h2{font-size:28px}}
+
+/* Advance exactly one ring spacing so each loop joins at the same pattern. */
+@media(max-width:760px){.dictation-row{grid-template-columns:58px minmax(0,1fr);gap:12px;padding:15px}.dictation-row-text{padding-left:0}}
+@property --studio-ring-phase{syntax:'<length>';inherits:false;initial-value:0px}
+@property --auth-ring-phase{syntax:'<length>';inherits:false;initial-value:0px}
+@keyframes studio-ring-flow{from{--studio-ring-phase:0px}to{--studio-ring-phase:42px}}
+@keyframes auth-ring-flow{from{--auth-ring-phase:0px}to{--auth-ring-phase:100px}}
+@media(prefers-reduced-motion:reduce){.dictation-guide:after,.sign-in-screen:before{animation:none}}

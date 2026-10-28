@@ -11,12 +11,12 @@ vi.mock('../src/renderer/audio/runtime', () => ({
 let root: Root; let host: HTMLDivElement;
 const onClose = vi.fn();
 beforeEach(() => {
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); onClose.mockReset();
+  vi.useFakeTimers();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); onClose.mockReset();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove();
-  document.documentElement.removeAttribute('style'); document.body.removeAttribute('style'); vi.unstubAllGlobals();
+  document.documentElement.removeAttribute('style'); document.body.removeAttribute('style'); vi.useRealTimers();vi.unstubAllGlobals();
 });
 async function render() {
   await act(async () => root.render(createElement(StrictMode, null, createElement(SettingsDialog, {
@@ -43,7 +43,7 @@ it('locks document scrolling while open and restores existing styles on unmount,
   expect(document.body.style.overflow).toBe('scroll');
 });
 it('closes when a gesture starts and ends on the backdrop', async () => {
-  const dialog = await render(); await gesture(dialog, dialog); expect(onClose).toHaveBeenCalledOnce();
+  const dialog = await render(); await gesture(dialog, dialog); expect(onClose).not.toHaveBeenCalled();expect(dialog.dataset.closing).toBe('true');expect(document.body.style.overflow).toBe('hidden');await act(async()=>vi.advanceTimersByTime(180)); expect(onClose).toHaveBeenCalledOnce();
 });
 it('keeps Settings open for content clicks and dialog border clicks', async () => {
   const dialog = await render(); const content = host.querySelector('.settings-content')!;
@@ -54,10 +54,21 @@ it('does not dismiss a drag that starts inside Settings and ends outside', async
   const dialog = await render(); await gesture(host.querySelector('.settings-content')!, dialog, [200, 200], [50, 50]);
   expect(onClose).not.toHaveBeenCalled();
 });
-it('keeps Escape and the close button working', async () => {
+it('keeps Escape and the close button working without duplicate dismissal', async () => {
   const dialog = await render();
   await act(async () => dialog.dispatchEvent(new Event('cancel', { cancelable: true })));
-  expect(onClose).toHaveBeenCalledOnce(); onClose.mockClear();
   await act(async () => (host.querySelector('[aria-label="Close settings"]') as HTMLButtonElement).click());
-  expect(onClose).toHaveBeenCalledOnce();
+  expect(onClose).not.toHaveBeenCalled();await act(async()=>vi.advanceTimersByTime(180));expect(onClose).toHaveBeenCalledOnce();
+});
+
+it('orders themes System, Dark, Light and shows the release version',async()=>{
+ await render();expect(Array.from(host.querySelectorAll('.theme-picker button')).map(button=>button.textContent)).toEqual(['System','Dark','Light']);expect(host.querySelector('.settings-version')?.textContent).toBe('Sargosh 1.0.1');
+});
+
+it('closes immediately when reduced motion is preferred',async()=>{
+ const media=vi.spyOn(window,'matchMedia').mockImplementation(query=>({matches:query==='(prefers-reduced-motion: reduce)',addEventListener(){},removeEventListener(){}} as unknown as MediaQueryList));
+ try{await render();await act(async()=>(host.querySelector('[aria-label="Close settings"]') as HTMLButtonElement).click());expect(onClose).toHaveBeenCalledOnce();}finally{media.mockRestore();}
+});
+it('cancels a pending exit callback when the modal is removed',async()=>{
+ await render();await act(async()=>(host.querySelector('[aria-label="Close settings"]') as HTMLButtonElement).click());await act(async()=>root.render(null));await act(async()=>vi.advanceTimersByTime(180));expect(onClose).not.toHaveBeenCalled();
 });

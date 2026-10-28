@@ -17,6 +17,7 @@ __pycache__/
 venv/
 helper/build/
 helper/dist/
+native/store-updater/dist/
 *.spec
 .claude/
 .codex/

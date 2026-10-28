@@ -232,9 +232,27 @@ class WindowsService:
                 return {'status': 'unavailable', 'message': 'This recording cannot insert again. Your transcript is still available in Sargosh.'}
             self._publish()
             try:
-                return self.uia.insert_text(destination, params['text'], self.delivery_cancel)
-            except Exception:
-                return {'status': 'unconfirmed', 'message': 'Insertion could not be confirmed. Check your textbox before continuing. Your transcript is still available in Sargosh.'}
+                session_id = params.get('sessionId')
+                return self.uia.insert_text(destination, params['text'], self.delivery_cancel,
+                                            on_first_input=lambda: self.emit('windows.delivery-first-input', {'sessionId': session_id}))
+            except Exception as error:
+                # Map only our fixed validation messages; never expose arbitrary
+                # COM exceptions, editor contents or clipboard contents in logs.
+                reason = {
+                    'The remembered input is no longer available': 'target-stale',
+                    'The remembered input no longer exists': 'target-stale',
+                    'The remembered input is unavailable or protected': 'target-protected',
+                    'Windows did not allow the destination to become active': 'focus-denied',
+                    'Destination focus could not be confirmed': 'focus-changed',
+                    'Destination focus changed during delivery': 'focus-changed',
+                    'Release keyboard modifiers before inserting': 'modifiers-held',
+                    'Keyboard modifiers changed during delivery': 'modifiers-held',
+                    'Destination keyboard layout is unavailable': 'layout-changed',
+                    'Keyboard layout changed during delivery': 'layout-changed',
+                    'Insertion cancelled': 'CANCELLED',
+                    'Paste could not be confirmed. Inspect the destination before retrying.': 'paste-unconfirmed',
+                }.get(str(error), 'native-error')
+                return {'status': 'unconfirmed', 'errorCode': reason, 'message': 'Insertion could not be confirmed. Check your textbox before continuing. Your transcript is still available in Sargosh.'}
             finally:
                 self.keyboard.reset()
         if method == 'insert-test':

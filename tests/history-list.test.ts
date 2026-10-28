@@ -18,7 +18,7 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test'); vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete window.sargosh; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete window.sargosh; vi.useRealTimers();vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function render() { await act(async () => root.render(createElement(HistoryList, { onNotice: notice }))); }
 async function click(selector: string) { const element = host.querySelector(selector) as HTMLElement; expect(element).not.toBeNull(); await act(async () => element.click()); }
 it('renders transcript, time, and precisely the three requested menu actions', async () => {
@@ -66,11 +66,17 @@ async function outsideGesture(dialog: HTMLDialogElement, start: Element = dialog
   });
 }
 it('dismisses deletion on a backdrop click without removing history', async () => {
-  const dialog = await deleteConfirmation(); await outsideGesture(dialog);
-  expect(host.querySelector('dialog')).toBeNull(); expect(remove).not.toHaveBeenCalled(); expect(host.textContent).toContain('Please send the notes');
+  vi.useFakeTimers();const dialog = await deleteConfirmation(); await outsideGesture(dialog);
+  expect(dialog.dataset.closing).toBe('true');expect(dialog.open).toBe(true);await act(async()=>vi.advanceTimersByTime(180));expect(host.querySelector('dialog')).toBeNull(); expect(remove).not.toHaveBeenCalled(); expect(host.textContent).toContain('Please send the notes');
 });
 it('keeps delete confirmation open for inside clicks or a drag from inside to outside', async () => {
   const dialog = await deleteConfirmation(); await outsideGesture(dialog, dialog, [200, 200], [200, 200]);
   expect(dialog.open).toBe(true); await outsideGesture(dialog, dialog.querySelector('p')!, [200, 200]);
   expect(dialog.open).toBe(true); expect(remove).not.toHaveBeenCalled();
+});
+
+it('animates Escape dismissal without deleting a transcript',async()=>{
+ vi.useFakeTimers();const dialog=await deleteConfirmation();expect(dialog.classList.contains('animated-modal')).toBe(true);
+ await act(async()=>dialog.dispatchEvent(new Event('cancel',{cancelable:true})));expect(dialog.dataset.closing).toBe('true');expect(remove).not.toHaveBeenCalled();
+ await act(async()=>vi.advanceTimersByTime(180));expect(host.querySelector('dialog')).toBeNull();expect(remove).not.toHaveBeenCalled();
 });

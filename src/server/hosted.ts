@@ -1,27 +1,44 @@
+import { installStreaming } from './streaming';
+import { createCleanupProvider, type CleanupProviderOptions } from './cleanup-provider';
+import { cleanupReservationCost, cleanupActualCost } from './cleanup-budget';
 import Fastify from 'fastify';
+import { installTimingHooks, timeRequest, markCached, cancelRequestTiming, providerTiming } from './timing';
+import type { TimingSink } from '../shared/timing';
 import { createHash } from 'node:crypto';
 import { MAX_AUDIO_BYTES } from '../shared/recording';
 import { audioType,isRequestId,isSpeechLanguage,type Transcript } from '../shared/transcription';
-import { DEFAULT_CLEANUP_MODEL,MAX_CLEANUP_CHARS,type CleanupModel,type CleanupResult } from '../shared/cleanup';
-import { CLEANUP_INSTRUCTIONS,CLEANUP_PROMPT_VERSION } from './cleanup-prompt';
-import { cleanTranscript,CleanupError,cleanupOutputLimit } from './gemini';
+import { MAX_CLEANUP_CHARS,type CleanupResult } from '../shared/cleanup';
+import { CLEANUP_PROMPT_VERSION } from './cleanup-prompt';
+import { CleanupError } from './cleanup-common';
 import { recognizeAudio,SpeechError } from './deepgram';
 import { normalizeAudio,AudioError,type NormalizedAudio } from './audio';
 import { sessionVerifier } from './auth';
 import { UsageError,type UsageStore,type UsageLease } from './usage';
-export interface HostedOptions {
+export interface HostedOptions extends CleanupProviderOptions {
+ openRecognizer?:typeof import('./deepgram-stream').openDeepgramStream;
+ streamingEnabled?:boolean; streamRateMicroPerMinute?:number;
+ timingSink?:TimingSink;
  authConfig?:{url:string;key:string};verifySession?:(token:string)=>Promise<string|null>;
- usageStore?:UsageStore;apiKey?:string;geminiApiKey?:string;geminiModel?:CleanupModel;
- fetcher?:typeof fetch;geminiFetcher?:typeof fetch;allowedHosts?:string[];ffmpegPath?:string;
+ usageStore?:UsageStore;apiKey?:string;
+ fetcher?:typeof fetch;allowedHosts?:string[];ffmpegPath?:string;
  sttRateMicroPerMinute?:number;
  deleteAccount?:(userId:string)=>Promise<void>;
  normalize?:(input:Buffer,signal:AbortSignal)=>Promise<NormalizedAudio>;
 }
 export function createHostedServer(options:HostedOptions){
+ const cleanup=createCleanupProvider(options);
  const verify=options.verifySession??(options.authConfig?sessionVerifier(options.authConfig):undefined);
- if(!verify||!options.usageStore||!options.allowedHosts?.length||!options.apiKey||!options.geminiApiKey)throw new Error('Hosted API requires authentication, usage storage, an allowed host, and provider configuration.');
+ if(!verify||!options.usageStore||!options.allowedHosts?.length||!options.apiKey||!cleanup.configured)throw new Error('Hosted API requires authentication, usage storage, an allowed host, and provider configuration.');
  const store=options.usageStore;
  const server=Fastify({logger:false,bodyLimit:MAX_AUDIO_BYTES,requestTimeout:90000});
+ installTimingHooks(server, options.timingSink);
+ installStreaming(server,{...options,store,enabled:options.streamingEnabled===true,rate:options.streamRateMicroPerMinute,
+  authorize:async(headers)=>{
+   if(!options.allowedHosts!.includes(headers.host??'')||headers.origin)throw new UsageError('API_ORIGIN','Use the Sargosh desktop app.',403);
+   const h=headers.authorization;const owner=typeof h==='string'&&h.startsWith('Bearer ')?await verify(h.slice(7)).catch(()=>null):null;
+   if(!owner)throw new UsageError('AUTH_REQUIRED','Sign in again to use live dictation.',401);return owner;
+  }
+ });
  const owners=new WeakMap<object,string>();let active=0;
  const cache=new Map<string,{fingerprint:string;time:number;result:Transcript|CleanupResult}>();
  server.addHook('onRequest',async(request,reply)=>{
@@ -34,7 +51,7 @@ export function createHostedServer(options:HostedOptions){
  });
  const authorized=async(request:any,reply:any)=>{
   const header=request.headers.authorization;const token=typeof header==='string'&&header.startsWith('Bearer ')?header.slice(7):'';
-  const userId=token?await verify(token).catch(()=>null):null;
+  const userId=token?await timeRequest(request,'server.auth',()=>verify(token).catch(()=>null)):null;
   if(!userId)return reply.code(401).send({code:'AUTH_REQUIRED',message:'Sign in again to use cloud dictation.'});owners.set(request,userId);
  };
  server.get('/health',async()=>({status:'ok',service:'sargosh-api',version:'0.1.0'}));
@@ -67,31 +84,55 @@ export function createHostedServer(options:HostedOptions){
   if(error instanceof UsageError||error instanceof AudioError||error instanceof SpeechError||error instanceof CleanupError)return reply.code(error.status).send({code:error.code,message:error.message,...(error instanceof UsageError&&error.resetAt?{resetAt:error.resetAt}:{})});
   return reply.code(503).send({code:'CLOUD_UNAVAILABLE',message:'Cloud dictation could not complete. Please try later.'});
  }
- for(const route of ['/v1/transcriptions','/v1/practice/transcriptions']) server.post(route,{onRequest:authorized},async(request,reply)=>{
-  const practice=route.includes('/practice/');
+ for(const route of ['/v1/transcriptions','/v1/practice/transcriptions','/v1/dictations','/v1/practice/dictations']) server.post(route,{onRequest:authorized},async(request,reply)=>{
+  const practice=route.includes('/practice/'),combined=route.endsWith('/dictations');
   const language=(request.query as {language?:unknown})?.language,id=request.headers['x-sargosh-request-id'];
   if(!isSpeechLanguage(language)||!isRequestId(id)||!audioType(request.headers['content-type']??'')||!Buffer.isBuffer(request.body)||!request.body.length)return reply.code(400).send({code:'INVALID_REQUEST',message:'A recording, supported language, and request ID are required.'});
-  const owner=owners.get(request)!;const fingerprint=createHash('sha256').update(practice?'practice:':'').update(language).update(request.body).digest('hex');
-  const abort=new AbortController();const disconnect=()=>{if(!reply.raw.writableEnded)abort.abort();};
+  const owner=owners.get(request)!;const fingerprint=createHash('sha256').update(practice?'practice:':'').update(combined?CLEANUP_PROMPT_VERSION+cleanup.fingerprint:'').update(language).update(request.body).digest('hex');
+  const abort=new AbortController();const disconnect=()=>{if(!reply.raw.writableEnded){cancelRequestTiming(request);abort.abort();}};
   let lease:UsageLease|undefined,dispatched=false,entered=false;
   try{
    // Verify account eligibility before decoding untrusted audio.
-   if(!(await store.snapshot(owner)).enabled)throw new UsageError('AUTH_REQUIRED','Verify your email before using cloud dictation.',403);
-   const previous=cached(owner,'stt',id,fingerprint);if(previous)return previous;
+   if(!(await timeRequest(request,'server.eligibility',()=>store.snapshot(owner))).enabled)throw new UsageError('AUTH_REQUIRED','Verify your email before using cloud dictation.',403);
+   const previous=cached(owner,combined?'dictation':'stt',id,fingerprint);if(previous){markCached(request);return previous;}
    if(active>=2)throw new UsageError('BUSY','The service is processing other recordings. Please try shortly.');active++;entered=true;
    request.raw.once('aborted',disconnect);reply.raw.once('close',disconnect);
-   const normalized=await(options.normalize??((bytes,signal)=>normalizeAudio(bytes,signal,options.ffmpegPath)))(request.body,abort.signal);
+   const normalized=await timeRequest(request,'server.normalize',()=>(options.normalize??((bytes,signal)=>normalizeAudio(bytes,signal,options.ffmpegPath)))(request.body as Buffer,abort.signal),{bytes:request.body.length},abort.signal);
    if(!Number.isInteger(normalized.durationSeconds)||normalized.durationSeconds<1||normalized.durationSeconds>300)throw new AudioError('RECORDING_LIMIT','A recording can be at most 5 minutes.');
    const cost=Math.ceil(normalized.durationSeconds*(options.sttRateMicroPerMinute??5200)/60);
    if(practice && normalized.durationSeconds>20)throw new UsageError('PRACTICE_DURATION','Keep practice recordings within 20 seconds.',400);
    if(practice && !store.reservePractice)throw new UsageError('PRACTICE_UNAVAILABLE','Practice is not available yet. Please try later.',503);
-   lease=practice?await store.reservePractice!(owner,id,'stt',fingerprint,normalized.durationSeconds,cost):await store.reserve(owner,id,'stt',fingerprint,normalized.durationSeconds,cost);
+   lease=await timeRequest(request,'server.reserve',()=>practice?store.reservePractice!(owner,id,'stt',fingerprint,normalized.durationSeconds,cost):store.reserve(owner,id,'stt',fingerprint,normalized.durationSeconds,cost));
    if(abort.signal.aborted)throw new AudioError('CANCELLED','Recording cancelled.',499);
-   await store.dispatch(lease);dispatched=true;
-   const result=await recognizeAudio({apiKey:options.apiKey!,audio:normalized.audio,mimeType:'audio/wav',language,signal:abort.signal,fetcher:options.fetcher});
-   await store.finish(lease);save(owner,'stt',id,fingerprint,result);return result;
+   await timeRequest(request,'server.dispatch',()=>store.dispatch(lease!));dispatched=true;
+   const result=await timeRequest(request,'server.stt',()=>recognizeAudio({apiKey:options.apiKey!,audio:normalized.audio,mimeType:'audio/wav',language,signal:abort.signal,fetcher:options.fetcher,measure:providerTiming(request,'stt')}),{audioMs:normalized.durationSeconds*1000,model:'nova-3'},abort.signal);
+   await timeRequest(request,'server.finish',()=>store.finish(lease!));
+   if(combined && result.text.trim()) {
+    let cleanupLease:UsageLease|undefined,cleanupDispatched=false;
+    try {
+     if(abort.signal.aborted)throw new CleanupError('CANCELLED','Cleanup cancelled.',499);
+     const model=cleanup.model,text=result.text;
+     if(text.length>MAX_CLEANUP_CHARS)throw new CleanupError('CLEANUP_INPUT','The transcript exceeds the cleanup limit. The original transcript is available.',400);
+     const cleanupFingerprint=createHash('sha256').update(practice?'practice:':'').update(CLEANUP_PROMPT_VERSION).update(cleanup.fingerprint).update(language).update(text).digest('hex');
+     const reservedCost=cleanupReservationCost(text,language,model);
+     if(practice && (text.length>3000 || !store.reservePractice))throw new UsageError('PRACTICE_UNAVAILABLE','This practice request cannot be processed.',400);
+     cleanupLease=await timeRequest(request,'server.reserve',()=>practice?store.reservePractice!(owner,id,'cleanup',cleanupFingerprint,0,reservedCost):store.reserve(owner,id,'cleanup',cleanupFingerprint,0,reservedCost));
+     if(abort.signal.aborted)throw new CleanupError('CANCELLED','Cleanup cancelled.',499);
+     await timeRequest(request,'server.dispatch',()=>store.dispatch(cleanupLease!));cleanupDispatched=true;
+     let actualCost:number|undefined;
+     const cleaned=await timeRequest(request,'server.cleanup',()=>cleanup.clean({text,language,signal:abort.signal,measure:providerTiming(request,'cleanup'),onUsage:usage=>{actualCost=cleanupActualCost(usage,text,language,model);}}),{characters:text.length,model},abort.signal);
+     await timeRequest(request,'server.finish',()=>store.finish(cleanupLease!,actualCost));
+     result.cleanup={ok:true,result:cleaned};
+    } catch(error) {
+     const known=error instanceof CleanupError||error instanceof UsageError;
+     result.cleanup={ok:false,code:known?error.code:'CLEANUP_FAILED',message:known?error.message:'Cleanup failed. The original transcript is available.'};
+    } finally {
+     if(cleanupLease&&!cleanupDispatched)await timeRequest(request,'server.release',()=>store.release(cleanupLease!)).catch(()=>{});
+    }
+   }
+   save(owner,combined?'dictation':'stt',id,fingerprint,result);return result;
   }catch(error){return failure(error,reply);}finally{
-   if(lease&&!dispatched)await store.release(lease).catch(()=>{});
+   if(lease&&!dispatched)await timeRequest(request,'server.release',()=>store.release(lease!)).catch(()=>{});
    if(entered)active--;request.raw.removeListener('aborted',disconnect);reply.raw.removeListener('close',disconnect);
   }
  });
@@ -99,25 +140,26 @@ export function createHostedServer(options:HostedOptions){
   const practice=route.includes('/practice/');
   const body=request.body as {text?:unknown;language?:unknown}|null,id=request.headers['x-sargosh-request-id'];
   if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>!['text','language'].includes(key))||typeof body.text!=='string'||!body.text.trim()||body.text.length>MAX_CLEANUP_CHARS||!isSpeechLanguage(body.language)||!isRequestId(id))return reply.code(400).send({code:'CLEANUP_INPUT',message:'A transcript, supported language, and request ID are required.'});
-  const owner=owners.get(request)!,model=options.geminiModel??DEFAULT_CLEANUP_MODEL;
-  const fingerprint=createHash('sha256').update(practice?'practice:':'').update(CLEANUP_PROMPT_VERSION).update(model).update(body.language).update(body.text).digest('hex');
-  const abort=new AbortController();const disconnect=()=>{if(!reply.raw.writableEnded)abort.abort();};
+  const owner=owners.get(request)!,model=cleanup.model;
+  const fingerprint=createHash('sha256').update(practice?'practice:':'').update(CLEANUP_PROMPT_VERSION).update(cleanup.fingerprint).update(body.language).update(body.text).digest('hex');
+  const abort=new AbortController();const disconnect=()=>{if(!reply.raw.writableEnded){cancelRequestTiming(request);abort.abort();}};
   let lease:UsageLease|undefined,dispatched=false,entered=false;
   try{
-   if(!(await store.snapshot(owner)).enabled)throw new UsageError('AUTH_REQUIRED','Verify your email before using cloud dictation.',403);
-   const previous=cached(owner,'cleanup',id,fingerprint);if(previous)return previous;
+   if(!(await timeRequest(request,'server.eligibility',()=>store.snapshot(owner))).enabled)throw new UsageError('AUTH_REQUIRED','Verify your email before using cloud dictation.',403);
+   const previous=cached(owner,'cleanup',id,fingerprint);if(previous){markCached(request);return previous;}
    if(active>=2)throw new UsageError('BUSY','The service is processing other recordings. Please try shortly.');active++;entered=true;
    request.raw.once('aborted',disconnect);reply.raw.once('close',disconnect);
    // UTF-8 byte count conservatively bounds text tokens; output includes the model's thinking budget.
-   const reservedCost=Math.ceil((Buffer.byteLength(JSON.stringify({language:body.language,transcript:body.text}))+Buffer.byteLength(CLEANUP_INSTRUCTIONS)+1024)*.30+cleanupOutputLimit(body.text)*2.50);
+   const reservedCost=cleanupReservationCost(body.text,body.language,model);
    if(practice && (body.text.length>3000 || !store.reservePractice))throw new UsageError('PRACTICE_UNAVAILABLE','This practice request cannot be processed.',400);
-   lease=practice?await store.reservePractice!(owner,id,'cleanup',fingerprint,0,reservedCost):await store.reserve(owner,id,'cleanup',fingerprint,0,reservedCost);
+   lease=await timeRequest(request,'server.reserve',()=>practice?store.reservePractice!(owner,id,'cleanup',fingerprint,0,reservedCost):store.reserve(owner,id,'cleanup',fingerprint,0,reservedCost));
    if(abort.signal.aborted)throw new AudioError('CANCELLED','Cleanup cancelled.',499);
-   await store.dispatch(lease);dispatched=true;let actualCost:number|undefined;
-   const result=await cleanTranscript({apiKey:options.geminiApiKey!,model,text:body.text,language:body.language,signal:abort.signal,fetcher:options.geminiFetcher,onUsage:usage=>{actualCost=Math.ceil(usage.inputTokens*.30+usage.outputTokens*2.50);}});
-   await store.finish(lease,actualCost);save(owner,'cleanup',id,fingerprint,result);return result;
+   await timeRequest(request,'server.dispatch',()=>store.dispatch(lease!));dispatched=true;let actualCost:number|undefined;
+   const text=body.text, language=body.language;
+   const result=await timeRequest(request,'server.cleanup',()=>cleanup.clean({text,language,signal:abort.signal,measure:providerTiming(request,'cleanup'),onUsage:usage=>{actualCost=cleanupActualCost(usage,text,language,model);}}),{characters:text.length,model},abort.signal);
+   await timeRequest(request,'server.finish',()=>store.finish(lease!,actualCost));save(owner,'cleanup',id,fingerprint,result);return result;
   }catch(error){return failure(error,reply);}finally{
-   if(lease&&!dispatched)await store.release(lease).catch(()=>{});
+   if(lease&&!dispatched)await timeRequest(request,'server.release',()=>store.release(lease!)).catch(()=>{});
    if(entered)active--;request.raw.removeListener('aborted',disconnect);reply.raw.removeListener('close',disconnect);
   }
  });

@@ -21,9 +21,18 @@ class DeliveryTests(unittest.TestCase):
     def params(self, service, text='नमस्ते 👋'):
         return {'sessionId': service.session.id, 'targetId': 'target', 'text': text}
 
+    def test_first_input_event_contains_only_the_current_session_id(self):
+        service = self.service()
+        def send(_destination, _text, _cancelled, on_first_input=None):
+            on_first_input()
+            return {'status': 'sent', 'message': 'Sent.'}
+        service.uia.insert_text.side_effect = send
+        service._command('insert-text', self.params(service))
+        service.emit.assert_any_call('windows.delivery-first-input', {'sessionId': service.session.id})
+
     def test_real_text_is_delivered_once_and_claimed_before_sending(self):
         service = self.service()
-        def send(destination, text, cancelled):
+        def send(destination, text, cancelled, on_first_input=None):
             self.assertTrue(service.session.delivery_attempted)
             self.assertEqual(text, 'नमस्ते 👋')
             return {'status': 'sent', 'message': 'Sent.'}
@@ -49,9 +58,21 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(service._command('insert-text', self.params(service))['status'], 'unavailable')
         service.uia.insert_text.assert_called_once()
 
+    def test_failure_diagnostics_are_specific_and_do_not_expose_arbitrary_errors(self):
+        for message, code in [
+            ('Destination focus changed during delivery', 'focus-changed'),
+            ('Paste could not be confirmed. Inspect the destination before retrying.', 'paste-unconfirmed'),
+            ('private editor contents', 'native-error'),
+        ]:
+            service = self.service()
+            service.uia.insert_text.side_effect = RuntimeError(message)
+            result = service._command('insert-text', self.params(service))
+            self.assertEqual(result['errorCode'], code)
+            self.assertNotIn('private editor contents', str(result))
+
     def test_cancellation_reaches_insertion_without_waiting_for_the_worker_queue(self):
         service = self.service(); entered = threading.Event()
-        def send(_destination, _text, cancelled):
+        def send(_destination, _text, cancelled, on_first_input=None):
             entered.set()
             if not cancelled.wait(2): raise AssertionError('Cancellation did not reach delivery')
             raise ValueError('Cancelled')

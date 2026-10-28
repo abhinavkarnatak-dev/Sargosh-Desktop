@@ -1,7 +1,7 @@
 {
   "name": "sargosh-desktop",
   "productName": "Sargosh",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "private": true,
   "description": "A Windows dictation companion with local history.",
   "main": "dist/main/entry.js",
@@ -13,8 +13,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p supabase/tsconfig.json && tsc --noEmit -p tsconfig.server.json",
     "test": "vitest run && python -m unittest discover -s helper -p test_*.py",
     "test:watch": "vitest",
+    "test:cleanup:live": "tsx scripts/check-cleanup.ts --live",
     "make": "npm run prepare:desktop && electron-forge make --platform=win32 --arch=x64",
     "package": "npm run prepare:desktop && electron-forge package --platform=win32 --arch=x64",
+    "make:msix": "npm run package && node scripts/build-msix.mjs",
     "dev:preview": "node scripts/dev.mjs --preview",
     "dev:desktop": "tsc -p tsconfig.main.json && node scripts/launch-desktop.mjs",
     "test:windows": "tsx scripts/windows-proof.ts",
@@ -25,7 +27,8 @@
     "build:desktop-config": "node scripts/build-desktop-config.mjs",
     "test:api-build": "node scripts/check-api-build.mjs",
     "build:helper": "node scripts/build-helper.mjs",
-    "prepare:desktop": "npm run build && npm run build:desktop-config && npm run build:helper",
+    "build:store-updater": "node scripts/build-store-updater.mjs",
+    "prepare:desktop": "npm run build && npm run build:desktop-config && npm run build:helper && npm run build:store-updater",
     "test:bundled-helper": "node scripts/check-bundled-helper.mjs",
     "test:packaged": "node scripts/check-packaged-app.mjs && node scripts/check-bundled-helper.mjs out/Sargosh-win32-x64/resources/sargosh-helper/sargosh-helper.exe"
   },
@@ -36,7 +39,8 @@
     "koffi": "^3.3.4",
     "lucide-react": "^0.468.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.11",
@@ -52,7 +56,8 @@
     "tsx": "^4.20.0",
     "typescript": "~5.9.3",
     "vite": "^8.3.5",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "@types/ws": "^8.18.2"
   },
   "author": "Abhinav Karnatak"
 }

@@ -12,19 +12,19 @@ module.exports = {
   packagerConfig: {
     asar: { unpack: '**/*.node' }, executableName: 'Sargosh', icon: 'assets/sargosh',
     ignore,
-    download: { cacheRoot: path.resolve('work/electron-cache'), tempDirectory: path.resolve('work/build-tmp') },
+    download: { checksums: require('electron/checksums.json'), cacheRoot: path.resolve('work/electron-cache'), tempDirectory: path.resolve('work/build-tmp') },
     tmpdir: path.resolve('work/build-tmp'),
-    extraResource: ['helper/dist/sargosh-helper'],
+    extraResource: ['helper/dist/sargosh-helper', 'native/store-updater/dist/sargosh-store-updater.exe'],
     appCopyright: 'Copyright Abhinav Karnatak'
   },
   hooks: {
     prePackage: async (_config, platform, arch) => {
       fs.mkdirSync(path.resolve('work/build-tmp'), { recursive: true });
       if (platform !== 'win32' || arch !== 'x64') throw new Error('This beta targets Windows x64.');
-      for (const file of ['dist/main/entry.js', 'dist/renderer/index.html', 'dist/desktop-config.json', 'helper/dist/sargosh-helper/sargosh-helper.exe']) {
+      for (const file of ['dist/main/entry.js', 'dist/renderer/index.html', 'dist/desktop-config.json', 'helper/dist/sargosh-helper/sargosh-helper.exe', 'native/store-updater/dist/sargosh-store-updater.exe']) {
         if (!fs.existsSync(path.resolve(file))) throw new Error('Run npm run prepare:desktop before packaging.');
       }
     }
   },
-  makers: [{ name: '@electron-forge/maker-squirrel', config: { name: 'Sargosh', authors: 'Abhinav Karnatak', setupIcon: 'assets/sargosh.ico', setupExe: `Sargosh-${version}-beta-Setup.exe`, noMsi: true } }]
+  makers: [{ name: '@electron-forge/maker-squirrel', config: { name: 'Sargosh', authors: 'Abhinav Karnatak', setupIcon: 'assets/sargosh.ico', setupExe: `Sargosh-${version}-Setup.exe`, noMsi: true } }]
 };

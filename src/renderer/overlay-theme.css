@@ -1,0 +1,36 @@
+/* Colors only: preserve the pill geometry, input behavior and notice placement. */
+:root[data-surface=overlay]{
+  --background:#eeeee6;--surface:#fbfcf5;--panel:#edeee5;--panel-hover:#e4e8dc;
+  --text:#233327;--muted:#687461;--border:#d6dccd;--accent:#375b3b;--accent-soft:#e2ead9;
+  --overlay-action-text:#fffef7;--overlay-error:#a34f31;
+}
+:root[data-surface=overlay][data-theme=dark]{
+  --background:#111813;--surface:#151e17;--panel:#19231b;--panel-hover:#202c22;
+  --text:#edf0e8;--muted:#a5afa3;--border:#2b392d;--accent:#bbd5a5;--accent-soft:#293b25;
+  --overlay-action-text:#1c2d1d;--overlay-error:#e3a289;
+}
+:root[data-surface=overlay] .overlay-pill{background:var(--surface);color:var(--text);border-color:var(--border)}
+:root[data-surface=overlay] .overlay-pill.expanded{background:var(--panel);border-color:var(--border)}
+:root[data-surface=overlay] .idle-line{background:var(--accent)}
+:root[data-surface=overlay] .overlay-mic{color:var(--text)}
+:root[data-surface=overlay] .overlay-mic:hover{background:var(--panel-hover)}
+:root[data-surface=overlay] .overlay-grip{color:var(--muted)}
+:root[data-surface=overlay] .overlay-tooltip,:root[data-surface=overlay] .custom-tooltip{background:var(--surface);color:var(--text);border-color:var(--border)}
+:root[data-surface=overlay] .overlay-test-label,:root[data-surface=overlay] .overlay-recording-status{color:var(--text)}
+:root[data-surface=overlay] .overlay-wave i{background:var(--accent)}
+:root[data-surface=overlay] .overlay-spinner{color:var(--accent)}
+:root[data-surface=overlay] .overlay-notice{background:var(--surface);color:var(--text);border-color:var(--border)}
+:root[data-surface=overlay] .overlay-notice-icon{color:var(--overlay-error)}
+:root[data-surface=overlay] .overlay-notice-icon.info{color:var(--accent)}
+:root[data-surface=overlay] .overlay-notice-close{background:transparent;color:var(--text);border-color:var(--border)}
+:root[data-surface=overlay] .overlay-notice-close:hover{background:var(--panel-hover)}
+:root[data-surface=overlay] .overlay-notice-close{position:relative;border-color:transparent}
+.overlay-notice-countdown{position:absolute;inset:-2px;width:27px;height:27px;pointer-events:none;transform:rotate(-90deg)}
+.overlay-grip{touch-action:none;user-select:none}
+.overlay-notice-countdown circle{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:0;animation:overlay-notice-expiry 5s linear forwards}
+@keyframes overlay-notice-expiry{to{stroke-dashoffset:1}}
+@media(prefers-reduced-motion:reduce){.overlay-notice-countdown circle{animation:none}}
+:root[data-surface=overlay] .overlay-notice p{color:var(--muted)}
+:root[data-surface=overlay] .overlay-notice-actions button{background:var(--accent);color:var(--overlay-action-text)}
+:root[data-surface=overlay] .overlay-notice-actions span{color:var(--overlay-error)}
+:root[data-surface=overlay] .overlay-recovery-text{background:var(--panel);color:var(--text);border-color:var(--border)}

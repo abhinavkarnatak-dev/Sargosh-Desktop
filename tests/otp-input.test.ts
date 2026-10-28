@@ -42,3 +42,10 @@ it('keeps Backspace, Delete, arrows, select-all, copy, and cut available to the 
 it('filters typed non-digits and accepts an autofilled six-digit value',async()=>{
  await type('12a3');expect(digits()).toBe('123');await type('001234');expect(digits()).toBe('001234');
 });
+
+it('places a visual caret in the active empty box and moves it as digits are entered',async()=>{
+ expect(host.querySelector('.otp-digit[data-active=true] .otp-caret')).not.toBeNull();
+ await type('12');expect(host.querySelectorAll('.otp-digit')[2].querySelector('.otp-caret')).not.toBeNull();
+ await paste('123456');expect(host.querySelector('.otp-caret')).toBeNull();
+ await type('12345');expect(host.querySelectorAll('.otp-digit')[5].querySelector('.otp-caret')).not.toBeNull();
+});

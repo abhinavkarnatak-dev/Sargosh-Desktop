@@ -23,7 +23,7 @@ it('automatically saves only after the full combination is released and resumes 
   await key('keydown', 'k', 'KeyK', { ctrlKey: true, altKey: true }); expect(persist).not.toHaveBeenCalled();
   await key('keyup', 'k', 'KeyK', { ctrlKey: true, altKey: true }); expect(persist).not.toHaveBeenCalled();
   await key('keyup', 'Control', 'ControlLeft');
-  expect(persist).toHaveBeenCalledExactlyOnceWith('Control+Alt+K'); expect(arm).toHaveBeenCalledExactlyOnceWith('Control+Alt+K'); expect(host.textContent).toContain('Shortcut saved.');
+  expect(persist).toHaveBeenCalledExactlyOnceWith('Control+Alt+K'); expect(arm).toHaveBeenCalledExactlyOnceWith('Control+Alt+K'); expect(host.querySelector('.success-toast')?.textContent).toContain('Shortcut saved.'); expect(host.querySelectorAll('.inline-help')[1]).toBeUndefined();
 });
 it('rejects unsupported keys without saving them', async () => {
   await render(); await choose(); await key('keydown', 'a', 'KeyA'); await key('keyup', 'a', 'KeyA');

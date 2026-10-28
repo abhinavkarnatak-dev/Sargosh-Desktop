@@ -20,7 +20,12 @@ it('handles installer events before loading the normal application', () => {
   const entry = readFileSync('src/main/entry.ts', 'utf8');
   for (const installing of [true, false]) {
     const calls: string[] = [];
-    runInNewContext(entry, { require: (name: string) => { calls.push(name); return name === 'electron-squirrel-startup' ? installing : undefined; } });
+    runInNewContext(entry, { process: {}, require: (name: string) => { calls.push(name); return name === 'electron-squirrel-startup' ? installing : undefined; } });
     expect(calls).toEqual(installing ? ['electron-squirrel-startup'] : ['electron-squirrel-startup', './main']);
   }
+});
+it('starts MSIX directly without loading the Squirrel installer handler', () => {
+  const calls: string[] = [];
+  runInNewContext(readFileSync('src/main/entry.ts', 'utf8'), { process: { windowsStore: true }, require: (name: string) => calls.push(name) });
+  expect(calls).toEqual(['./main']);
 });

@@ -37,3 +37,21 @@ it('handles digit carry, formatted thousands, and decreasing values', async () =
     expect(host.textContent).toBe('998');
   } finally { await act(async () => root.unmount()); }
 });
+
+it('compacts word totals while keeping the exact accessible count and rolling from the current decimal digit',async()=>{
+  vi.useFakeTimers();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
+  const host=document.createElement('div'),root=createRoot(host);
+  const render=async(value:number)=>{await act(async()=>root.render(createElement(RollingNumber,{value,compact:true})));};
+  const visual=()=>host.querySelector('.rolling-number-visual')?.textContent;
+  try{
+    await render(999);expect(visual()).toBe('999');
+    await render(1000);await act(async()=>vi.advanceTimersByTime(480));expect(visual()).toBe('1K');
+    await render(1100);expect([...host.querySelectorAll('.rolling-digit-track')].map(node=>node.textContent)).toEqual(['1','01']);
+    await act(async()=>vi.advanceTimersByTime(480));expect(visual()).toBe('1.1K');
+    await render(1266);await act(async()=>vi.advanceTimersByTime(480));expect(visual()).toBe('1.2K');
+    expect(host.querySelector('[role=img]')?.getAttribute('aria-label')).toBe((1266).toLocaleString());
+    await render(1356);await act(async()=>vi.advanceTimersByTime(480));expect(visual()).toBe('1.3K');
+    await render(1999);await act(async()=>vi.advanceTimersByTime(480));expect(visual()).toBe('1.9K');
+    await render(12500);await act(async()=>vi.advanceTimersByTime(480));expect(visual()).toBe('12.5K');
+  }finally{await act(async()=>root.unmount());}
+});

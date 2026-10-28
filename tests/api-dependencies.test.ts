@@ -9,5 +9,5 @@ it('keeps the API dependency graph independent of desktop files and dependencies
  for(const [name,entry] of Object.entries(lock.packages) as [string,{link?:boolean;resolved?:string}][]){
   expect(name).not.toMatch(/^\.\./);expect(entry.link).not.toBe(true);expect(entry.resolved??'').not.toMatch(/^(file:|\.\.)/);
  }
- expect(Object.keys(manifest.dependencies).sort()).toEqual(['@supabase/supabase-js','fastify']);
+ expect(Object.keys(manifest.dependencies).sort()).toEqual(['@supabase/supabase-js','fastify','ws']);
 });

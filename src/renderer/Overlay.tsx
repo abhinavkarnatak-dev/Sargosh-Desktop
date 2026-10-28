@@ -1,12 +1,28 @@
 import { shortcutLabel } from '../shared/shortcut-label';
 import { recordingNotice, type OverlayNotice } from '../shared/overlay-notice';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, Copy, GripVertical, LoaderCircle, Mic, X } from 'lucide-react';
 import type { TranscriptionStatus } from '../shared/transcription';
 import { INITIAL_RECORDING_STATE, recordingBusy, type RecordingState } from '../shared/recording';
 import { INITIAL_WINDOWS_STATE, type WindowsState } from '../shared/windows';
+import { syncOverlayTheme } from './overlay-theme';
+import { DEFAULT_DOCK, type DockState } from '../shared/overlay-dock';
 export function Overlay() {
+  useEffect(syncOverlayTheme,[]);
   const [expanded, setExpanded] = useState(false);
+  const [dock, setDock] = useState<DockState>(DEFAULT_DOCK);
+  useEffect(() => {
+    let active = true, received = false, wasDragging = false;
+    const update = (next: DockState) => {
+      if (!active) return;
+      received = true; setDock(next);
+      if (wasDragging && !next.dragging) { drag.current = false; setExpanded(false); }
+      wasDragging = next.dragging;
+    };
+    const unsubscribe = window.sargosh?.onOverlayDock?.(update);
+    void window.sargosh?.overlayDockState?.().then(next => { if (!received) update(next); }).catch(() => {});
+    return () => { active = false; unsubscribe?.(); };
+  }, []);
   const [state, setState] = useState<WindowsState>(INITIAL_WINDOWS_STATE);
   const [audio, setAudio] = useState<RecordingState>(INITIAL_RECORDING_STATE);
   const [speech, setSpeech] = useState<TranscriptionStatus>({ phase: 'idle', message: '' });
@@ -14,7 +30,9 @@ export function Overlay() {
   const [dismissed, setDismissed] = useState<string | null>(null);
   const noticeElement = useRef<HTMLDivElement>(null);
   useEffect(() => { setError(''); }, [audio.sessionId]);
-  const drag = useRef<{ x: number; y: number } | null>(null);
+  const drag = useRef(false);
+  const stopDrag = () => { drag.current = false; void window.sargosh?.overlayDrag?.('stop').catch(() => {}); };
+  useEffect(() => () => { void window.sargosh?.overlayDrag?.('stop').catch(() => {}); }, []);
   useEffect(() => {
     if (!window.sargosh) return;
     const update = (next: WindowsState) => setState(current => next.revision >= current.revision ? next : current);
@@ -49,7 +67,7 @@ export function Overlay() {
     if (!element) return;
     const observer = new ResizeObserver(resize); observer.observe(element);
     return () => observer.disconnect();
-  }, [visibleNotice?.id]);
+  }, [visibleNotice?.id, dock.position]);
   async function recordingAction(value: 'cancel' | 'finish') {
     setError('');
     try {
@@ -62,7 +80,7 @@ export function Overlay() {
     try { if (!window.sargosh) throw new Error(); const next = await window.sargosh.windowsAction(value); if (next) setState(current => next.revision >= current.revision ? next : current); }
     catch { setError('Control unavailable. Quit Sargosh from the tray and reopen it.'); }
   }
-  return <div className="overlay-stage">
+  return <div className="overlay-stage" data-dock={dock.position} data-dragging={dock.dragging}>
     {visibleNotice && <div ref={noticeElement} className="overlay-notice-wrap"><NoticeCard key={visibleNotice.id} notice={visibleNotice} onDismiss={() => { setDismissed(visibleNotice.id); setError(''); }} /></div>}
     <div className={(expanded || active || audioActive || cloudActive ? 'overlay-pill expanded' : 'overlay-pill') + (audioActive || cloudActive ? ' recording-active' : active ? ' input-test-active' : '')} onMouseEnter={() => setExpanded(true)} onMouseLeave={() => { if (!drag.current) setExpanded(false); }}>
       {preparing ? <div className="overlay-preparing" role="status" aria-label="Preparing text">
@@ -77,17 +95,40 @@ export function Overlay() {
         <span className="overlay-test-label" data-tooltip="Input tracking only. No audio is recorded.">{state.phase === 'pending' ? 'Starting test' : state.mode === 'hold' ? 'Hold test' : 'Input test'}</span>
         {state.mode === 'hands-free' && <button className="overlay-mic" aria-label="Finish input test session" data-tooltip="Finish input test" onClick={() => void action('finish')}><Check size={15} /></button>}
       </> : expanded ? <>
-        <button className="overlay-grip" aria-label="Move dictation control" onPointerDown={event => { drag.current = { x: event.screenX, y: event.screenY }; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={event => { if (!drag.current) return; const dx = event.screenX - drag.current.x; const dy = event.screenY - drag.current.y; drag.current = { x: event.screenX, y: event.screenY }; void window.sargosh?.moveOverlay(dx, dy); }} onPointerUp={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }}><GripVertical size={15} /></button>
+        <button className="overlay-grip" aria-label="Move dictation control" data-tooltip="" onPointerDown={event => {
+          if (event.button !== 0) return;
+          const pill = event.currentTarget.closest('.overlay-pill')?.getBoundingClientRect();
+          if (!pill || !window.sargosh?.overlayDrag) return;
+          event.preventDefault(); drag.current = true;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          void window.sargosh.overlayDrag('start', { x: pill.x, y: pill.y, width: pill.width, height: pill.height }, window.matchMedia('(prefers-reduced-motion: reduce)').matches).catch(stopDrag);
+        }} onPointerUp={stopDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}><GripVertical size={15} /></button>
         <button className="overlay-mic" aria-label={state.enabled ? state.purpose === 'recording' ? 'Start hands-free recording' : 'Start hands-free input test' : 'Open Sargosh to set up dictation'} data-tooltip="" onClick={() => state.enabled ? void action('start-hands-free') : void window.sargosh?.openMain()}><Mic size={19} /></button>
         <span className="overlay-tooltip">{state.enabled ? (state.purpose === 'recording' ? 'Dictate - ' : 'Input test - ') + shortcutLabel(state.shortcut) : 'Set up dictation in Sargosh'}</span>
-      </> : <span className="idle-line" />}
+      </> : <span className="idle-line" aria-hidden="true" />}
     </div>
   </div>;
 }
 
-function NoticeCard({ notice, onDismiss }: { notice: OverlayNotice; onDismiss: () => void }) {
+export function NoticeCard({ notice, onDismiss }: { notice: OverlayNotice; onDismiss: () => void }) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState('');
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const closeTimer = useRef<number | undefined>(undefined);
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
+  const close = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { dismiss.current(); return; }
+    setClosing(true);
+    closeTimer.current = window.setTimeout(() => dismiss.current(), 180);
+  }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(close, 5000);
+    return () => { window.clearTimeout(timer); window.clearTimeout(closeTimer.current); };
+  }, [notice.id, close]);
   async function openHelp() {
     try {
       if (!window.sargosh) throw new Error();
@@ -102,8 +143,8 @@ function NoticeCard({ notice, onDismiss }: { notice: OverlayNotice; onDismiss: (
       await window.sargosh.copyOverlayText(notice.id); setCopied(true); setCopyError('');
     } catch { setCopyError('Could not copy. Open Sargosh to recover your text.'); }
   }
-  return <section className="overlay-notice" role={notice.kind === 'info' ? 'status' : 'alert'} aria-label={notice.title}>
-    <header>{notice.kind !== 'info' && <span className={'overlay-notice-icon ' + notice.kind}><AlertCircle size={16} /></span>}<strong>{notice.title}</strong><button className="overlay-notice-close" aria-label="Dismiss notification" onClick={onDismiss}><X size={17} /></button></header>
+  return <section className="overlay-notice" data-closing={closing} role={notice.kind === 'info' ? 'status' : 'alert'} aria-label={notice.title}>
+    <header>{notice.kind !== 'info' && <span className={'overlay-notice-icon ' + notice.kind}><AlertCircle size={16} /></span>}<strong>{notice.title}</strong><button className="overlay-notice-close" aria-label="Dismiss notification" data-tooltip="" onClick={close}><svg key={notice.id} className="overlay-notice-countdown" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="12" pathLength="1" /></svg><X size={17} /></button></header>
     <p>{notice.message}</p>
     {notice.text && <div className="overlay-recovery-text" tabIndex={0} aria-label="Recovered dictation">{notice.text}</div>}
     <div className="overlay-notice-actions">

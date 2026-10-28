@@ -19,3 +19,31 @@ it('keeps an existing good transcript if a paid stage fails', async () => {
   const { history, provider } = fixture(); provider.cleanup.mockRejectedValueOnce(new Error('Quota'));
   await expect(retrySavedTranscript(id, history, provider)).rejects.toThrow('Quota'); expect(history.update).not.toHaveBeenCalled();
 });
+
+it('reuses the combined result on history retry without another cleanup request', async () => {
+  const { history, provider } = fixture();
+  provider.transcribe.mockResolvedValueOnce({ ok: true, result: { text: 'Raw words', language: 'hi', model: 'nova-3', durationMs: 1000, confidence: .9,
+    cleanup: { ok: true, result: { text: 'Combined final words', model: 'gemini-3.5-flash-lite' } } } } as never);
+  await retrySavedTranscript(id, history, provider);
+  expect(provider.transcribe).toHaveBeenCalledWith(expect.objectContaining({ cleanup: true }));
+  expect(provider.cleanup).not.toHaveBeenCalled();
+  expect(history.update).toHaveBeenCalledWith(expect.objectContaining({ text: 'Combined final words', originalText: 'Raw words' }));
+});
+
+it('retries only cleanup for failed entries with a saved original, without uploading or consuming audio again', async () => {
+  const { history, provider } = fixture();
+  history.get.mockResolvedValueOnce({ id, createdAt: '', text: 'Raw words', originalText: 'Raw words', words: 0, durationMs: 1000, status: 'failed', language: 'hi', cleanupEnabled: true } as never);
+  await retrySavedTranscript(id, history, provider);
+  expect(history.audio).not.toHaveBeenCalled(); expect(provider.transcribe).not.toHaveBeenCalled();
+  expect(provider.cleanup).toHaveBeenCalledOnce();
+  expect(provider.cleanup).toHaveBeenCalledWith(expect.objectContaining({ text: 'Raw words', language: 'hi' }));
+  expect(history.update).toHaveBeenCalledWith(expect.objectContaining({ text: 'Final words', originalText: 'Raw words', status: 'completed' }));
+});
+it('retains the original and specific failure message if cleanup-only recovery fails', async () => {
+  const { history, provider } = fixture();
+  history.get.mockResolvedValueOnce({ id, createdAt: '', text: 'Raw words', originalText: 'Raw words', words: 0, durationMs: 1000, status: 'failed', language: 'hi', cleanupEnabled: true } as never);
+  provider.cleanup.mockResolvedValueOnce({ ok: false, code: 'GEMINI_TIMEOUT', message: 'Cleanup took too long.' } as never);
+  await expect(retrySavedTranscript(id, history, provider)).rejects.toThrow('Cleanup took too long.');
+  expect(provider.transcribe).not.toHaveBeenCalled();
+  expect(history.update).toHaveBeenCalledWith(expect.objectContaining({ originalText: 'Raw words', status: 'failed', error: 'Cleanup took too long.' }));
+});

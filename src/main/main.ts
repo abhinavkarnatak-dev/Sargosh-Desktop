@@ -1,4 +1,12 @@
+import { DesktopStreamer } from './streaming';
+import { StoreUpdates } from './store-updates';
+import { NativeStoreBridge } from './store-bridge';
+import { registerStoreRestart } from './store-restart';
+import { NO_STORE_UPDATES, type StoreUpdateAction } from '../shared/store-update';
+import { STREAM_MAX_CHUNK, type StreamRequest } from '../shared/streaming';
 import { microphoneCheck, microphoneRequest } from './microphone-permissions';
+import { createTimingLog } from './timing-log';
+import { safeTiming, setTimingSink, TimingTrace } from '../shared/timing';
 import { createSplash } from './splash';
 import { StartupGate } from './startup';
 import { validAccountUsage } from '../shared/usage';
@@ -14,7 +22,12 @@ import { LocalHistory } from './history';
 import { isHistoryId, type HistoryCapture, type HistoryResult } from '../shared/history';
 import { titleBarAppearance } from './titlebar';
 import { recoveryTextForCopy, validOverlayNotice } from '../shared/overlay-notice';
-import { resizeOverlayBounds } from './overlay-bounds';
+import { DEFAULT_DOCK, validDockPreference } from '../shared/overlay-dock';
+import { OverlayDocking } from './overlay-docking';
+import { OverlayDropZones } from './overlay-drop-zones';
+import { mkdir, writeFile, rename } from 'node:fs/promises';
+import { OverlayDrag, type OverlayGripBounds } from './overlay-drag';
+import { overlayMousePressed } from './overlay-input';
 import { deliveryTimeout, validDeliveryRequest, type DeliveryResult } from '../shared/delivery';
 import { app, clipboard, dialog, safeStorage, shell, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, screen, session, Tray, webContents, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
@@ -33,11 +46,14 @@ const dev = !app.isPackaged;
 const rendererURL = dev ? process.env.SARGOSH_RENDERER_URL : undefined;
 if (dev) app.setPath('userData', path.join(root, '.local', 'electron'));
 app.setName('Sargosh');
-if (process.platform === 'win32') app.setAppUserModelId('com.squirrel.Sargosh.Sargosh');
+const timingLog = createTimingLog(path.join(app.getPath('userData'), 'logs'), app.getVersion());
+setTimingSink(timingLog);
+// MSIX supplies its own identity. The Squirrel ID applies only to direct installs.
+if (process.platform === 'win32' && !process.windowsStore) app.setAppUserModelId('com.squirrel.Sargosh.Sargosh');
 let mainWindow: BrowserWindow | undefined;
 let splashWindow: BrowserWindow | undefined;
 function closeSplash() { if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy(); splashWindow = undefined; }
-const startup = new StartupGate(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); closeSplash(); });
+const startup = new StartupGate(() => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); closeSplash(); storeUpdates?.activityChanged(); });
 function startupFailed() {
   if (startup.complete || quitting) return;
   startup.cancel(); closeSplash();
@@ -45,14 +61,22 @@ function startupFailed() {
   app.quit();
 }
 let overlayWindow: BrowserWindow | undefined;
+let overlayDocking: OverlayDocking | undefined;
+let overlayDrag: OverlayDrag | undefined;
+let overlayReducedMotion = false;
+const overlayZones = new OverlayDropZones();
+let dockWrites = Promise.resolve();
 let tray: Tray | undefined;
 let quitting = false;
 let activeDelivery: string | null = null;
+let firstInputTiming: ReturnType<TimingTrace['span']> | undefined;
 let history: LocalHistory | undefined;
 let auth: DesktopAuth | undefined;
 let authStorage: AuthStorage | undefined;
 let accountChanging = false;
 let historyRetry: string | null = null;
+let storeUpdates:StoreUpdates|undefined;
+let appliedWindowTheme:'light'|'dark'=nativeTheme.shouldUseDarkColors?'dark':'light';
 const finishedRecordings = new Map<string, { createdAt: string; durationMs: number; bytes: number; mimeType: string }>();
 const helper = new Helper();
 let desktopEnvironment:Record<string,string|undefined>={...process.env};
@@ -61,19 +85,21 @@ if(!dev){try{desktopEnvironment={...JSON.parse(readFileSync(path.join(root,'dist
 if(!dev&&!desktopEnvironment.SARGOSH_API_URL)throw new Error('The installed app is missing its hosted API configuration.');
 const apiBase=apiEndpoint(desktopEnvironment.SARGOSH_API_URL??'http://127.0.0.1:4318');
 const transcriber = new DesktopTranscriber(async () => { if (!auth) throw new Error('Sign in to use cloud dictation.'); return auth.accessToken(); },apiBase);
+const streamer = new DesktopStreamer(async()=>{if(!auth)throw new Error('Sign in first.');return auth.accessToken();},apiBase);
 const recordingCommands = new RecordingCommands();
 let transcriptionStatus: TranscriptionStatus = { phase: 'idle', message: '' };
 let recordingState: RecordingState = { ...INITIAL_RECORDING_STATE };
 let windowsState: WindowsState = { ...INITIAL_WINDOWS_STATE };
 function recordingUpdate(state: RecordingState) {
   recordingState = { ...state, revision: recordingState.revision + 1 };
+  storeUpdates?.activityChanged();
   for (const window of [mainWindow, overlayWindow]) {
     if (window && !window.isDestroyed()) window.webContents.send('sargosh:recording-state', recordingState);
   }
 }
 function stopOwner(message: string) {
   recordingCommands.cancelAll();
-  transcriber.cancelAll();
+  transcriber.cancelAll(); streamer.cancel();
   if (activeDelivery) void helper.call('windows.cancel-delivery', { sessionId: activeDelivery }).catch(() => {});
   transcriptionStatus = { phase: 'cancelled', message: 'Transcription cancelled.' };
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('sargosh:transcription-state', transcriptionStatus);
@@ -98,9 +124,9 @@ function createWindow(overlay = false): BrowserWindow {
     width: overlay ? 420 : 1220, height: overlay ? 120 : 820,
     minWidth: overlay ? 200 : 860, minHeight: overlay ? 50 : 620,
     title: 'Sargosh', show: false, autoHideMenuBar: true, backgroundColor: overlay ? '#00000000' : '#f7f6f2',
-    ...(overlay ? { frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true, resizable: false, focusable: false } : process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: titleBarAppearance(nativeTheme.shouldUseDarkColors ? 'dark' : 'light') } : {}),
+    ...(overlay ? { frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true, resizable: false, focusable: false } : process.platform === 'win32' ? { titleBarStyle: 'hidden', titleBarOverlay: titleBarAppearance(appliedWindowTheme) } : {}),
     icon: path.join(root, 'assets', 'app-icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, backgroundThrottling: false }
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required' }
   });
   if (overlay) enableOverlayInput(window);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -124,7 +150,7 @@ function showMain(): void { if (!startup.complete) { if (splashWindow && !splash
 if (ownsLock) {
   app.on('second-instance', showMain);
   app.whenReady().then(async () => {
-    splashWindow = createSplash(path.join(root, dev ? 'src/renderer/public/brand' : 'dist/renderer/brand'), nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+    splashWindow = createSplash(nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
     Menu.setApplicationMenu(null);
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
       callback(microphoneRequest(contents.getURL(), permission, details, trustedURL));
@@ -141,8 +167,15 @@ if (ownsLock) {
       if (event.sender === mainWindow?.webContents) startup.rendered();
     });
     function ownerHandle(channel: string, work: (value: any) => unknown) {
-      ipcMain.handle(channel, (event, value) => { checkSender(event); if (event.sender !== mainWindow?.webContents || quitting || accountChanging) throw new Error('History is unavailable.'); if (channel.startsWith('sargosh:history-') || channel === 'sargosh:delete') requireAccount(); return work(value); });
+      ipcMain.handle(channel, (event, value) => { checkSender(event); if (event.sender !== mainWindow?.webContents || quitting || accountChanging) throw new Error('History is unavailable.'); if(storeUpdates?.installing)throw new Error('Wait for the app update to finish.'); if (channel.startsWith('sargosh:history-') || channel === 'sargosh:delete') requireAccount(); return work(value); });
     }
+    for(const name of ['state','action'] as const)ipcMain.handle('sargosh:store-update-'+name,(event,value:unknown)=>{
+      checkSender(event);
+      if(event.sender!==mainWindow?.webContents||quitting)throw new Error('Update controls are unavailable.');
+      if(name==='state')return storeUpdates?.snapshot()??NO_STORE_UPDATES;
+      if(!['check','download','later','install'].includes(value as string))throw new Error('Invalid update action.');
+      return storeUpdates?.action(value as StoreUpdateAction)??NO_STORE_UPDATES;
+    });
     let authConfig;
     authConfig=publicAuthConfig(desktopEnvironment);
     authStorage = new AuthStorage(path.join(app.getPath('userData'), 'auth-session.bin'), safeStorage);
@@ -171,7 +204,7 @@ if (ownsLock) {
       if (!hasProfileName(auth.snapshot().user)) throw new Error('Enter your name to finish setting up Sargosh.');
     }
     function authAction(channel: string, work: (value: any) => unknown) {
-      ownerHandle(channel, value => { if (recordingBusy(recordingState) || transcriber.busy || activeDelivery || historyRetry) throw new Error('Finish the current dictation first.'); return work(value); });
+      ownerHandle(channel, value => { if (recordingBusy(recordingState) || transcriber.busy || streamer.busy || activeDelivery || historyRetry) throw new Error('Finish the current dictation first.'); return work(value); });
     }
     ownerHandle('sargosh:usage',async()=>{
       requireAccount();if(!apiBase.startsWith('https://'))return null;
@@ -221,7 +254,7 @@ if (ownsLock) {
       await history!.exportAudio(id, result.filePath); return true;
     });
     ownerHandle('sargosh:history-retry', async (id: string) => {
-      if (historyRetry || activeDelivery || transcriber.busy || transcriptionStatus.phase === 'working' || recordingBusy(recordingState) || ['pending', 'listening'].includes(windowsState.phase)) throw new Error('Finish the current dictation first.');
+      if (historyRetry || activeDelivery || transcriber.busy || streamer.busy || transcriptionStatus.phase === 'working' || recordingBusy(recordingState) || ['pending', 'listening'].includes(windowsState.phase)) throw new Error('Finish the current dictation first.');
       if (!isHistoryId(id)) throw new Error('Invalid recording.');
       historyRetry = id;
       try {
@@ -233,28 +266,58 @@ if (ownsLock) {
       }
     });
     helper.onEvent((event, data) => {
+      if (event === 'windows.delivery-first-input') {
+        const id = (data as { sessionId?: unknown } | null)?.sessionId;
+        if (typeof id === 'string' && id === activeDelivery) {
+          firstInputTiming?.end();
+          try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sargosh:delivery-first-input', id); } catch { /* Diagnostics are best-effort. */ }
+        }
+        return;
+      }
       if (event === 'helper.unavailable') { stopOwner('Windows input access stopped. Recording cancelled. Restart Sargosh.'); return; }
       if (event !== 'windows.state') return;
       windowsState = data as WindowsState;
+      storeUpdates?.activityChanged();
       for (const window of [mainWindow, overlayWindow]) {
         if (window && !window.isDestroyed()) window.webContents.send('sargosh:windows-state', data);
       }
     });
+    ipcMain.handle('sargosh:timing', (event, value: unknown) => {
+      checkSender(event);
+      if (event.sender !== mainWindow?.webContents) throw new Error('Invalid timing sender.');
+      const entry = safeTiming(value);
+      if (entry && (entry.scope === 'desktop' || entry.scope === 'client')) timingLog(entry);
+    });
     handle('sargosh:windows-status', () => helper.call('windows.status'));
     handle('sargosh:recording-status', () => recordingState);
+    ipcMain.handle('sargosh:stream-start',(event,request:StreamRequest)=>{
+      checkSender(event);
+      if(event.sender!==mainWindow?.webContents||!request||!isRequestId(request.requestId)||request.traceId!==request.requestId||!isSpeechLanguage(request.language)||typeof request.cleanup!=='boolean')throw new Error('Invalid live dictation request.');
+      if(storeUpdates?.installing||historyRetry||transcriber.busy)return {ok:false,code:'BUSY',message:'Finish the current request first.'};
+      return streamer.start(request);
+    });
+    ipcMain.handle('sargosh:stream-chunk',(event,value)=>{
+      checkSender(event);
+      if(event.sender!==mainWindow?.webContents||!isRequestId(value?.id)||!(value?.audio instanceof ArrayBuffer)||value.audio.byteLength>STREAM_MAX_CHUNK)throw new Error('Invalid live audio.');
+      return streamer.chunk(value.id,value.audio);
+    });
+    for(const action of ['finish','cancel'] as const)ipcMain.handle('sargosh:stream-'+action,(event,id:unknown)=>{
+      checkSender(event);if(event.sender!==mainWindow?.webContents||!isRequestId(id))throw new Error('Invalid live request.');
+      if(action==='cancel'){streamer.cancel(id);return;}return streamer.finish(id);
+    });
     for (const channel of ['sargosh:transcribe', 'sargosh:practice-transcribe']) ipcMain.handle(channel, (event, request: TranscriptionRequest) => {
       checkSender(event);
       if (event.sender !== mainWindow?.webContents || !request || !isRequestId(request.requestId) || !isSpeechLanguage(request.language) ||
           !(request.audio instanceof ArrayBuffer) || !request.audio.byteLength || request.audio.byteLength > MAX_AUDIO_BYTES ||
-          typeof request.mimeType !== 'string' || !audioType(request.mimeType)) throw new Error('Invalid audio transcription request.');
-      if (historyRetry) return { ok: false, code: 'BUSY', message: 'Wait for the transcript retry to finish.' };
+          typeof request.mimeType !== 'string' || !audioType(request.mimeType) || (request.cleanup !== undefined && typeof request.cleanup !== 'boolean')) throw new Error('Invalid audio transcription request.');
+      if (storeUpdates?.installing || historyRetry || streamer.busy) return { ok: false, code: 'BUSY', message: 'Wait for the current task to finish.' };
       return transcriber.transcribe({ ...request, practice: channel === 'sargosh:practice-transcribe' });
     });
     for (const channel of ['sargosh:cleanup', 'sargosh:practice-cleanup']) ipcMain.handle(channel, (event, request: CleanupRequest) => {
       checkSender(event);
       if (event.sender !== mainWindow?.webContents || !request || !isRequestId(request.requestId) || !isSpeechLanguage(request.language) ||
           typeof request.text !== 'string' || !request.text.trim() || request.text.length > MAX_CLEANUP_CHARS) throw new Error('Invalid cleanup request.');
-      if (historyRetry) return { ok: false, code: 'BUSY', message: 'Wait for the transcript retry to finish.' };
+      if (storeUpdates?.installing || historyRetry || streamer.busy) return { ok: false, code: 'BUSY', message: 'Wait for the current task to finish.' };
       return transcriber.cleanup({ ...request, practice: channel === 'sargosh:practice-cleanup' });
     });
     ipcMain.handle('sargosh:transcription-cancel', (event, requestId: unknown) => {
@@ -267,7 +330,8 @@ if (ownsLock) {
       if (event.sender !== mainWindow?.webContents || !value || !['idle', 'working', 'completed', 'failed', 'cancelled'].includes(value.phase) || typeof value.message !== 'string' || value.message.length > 400) throw new Error('Invalid transcription status.');
       if (value.notice !== undefined && !validOverlayNotice(value.notice)) throw new Error('Invalid overlay notice.');
       transcriptionStatus = { phase: value.phase, message: value.message, ...(value.notice ? { notice: value.notice } : {}) };
-      void helper.call('windows.set-busy', { busy: value.phase === 'working' || historyRetry !== null }).catch(() => {});
+      void helper.call('windows.set-busy', { busy: storeUpdates?.installing === true || value.phase === 'working' || historyRetry !== null }).catch(() => {});
+      storeUpdates?.activityChanged();
       if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('sargosh:transcription-state', transcriptionStatus);
     });
     handle('sargosh:transcription-status', () => transcriptionStatus);
@@ -316,8 +380,18 @@ if (ownsLock) {
         return { status: 'unavailable', message: 'The saved input is unavailable. Select a textbox before a new recording. Your transcript is still available.' };
       }
       activeDelivery = request.sessionId;
-      try { return await helper.call<DeliveryResult>('windows.insert-text', request, deliveryTimeout(request.text)); }
-      finally { activeDelivery = null; }
+      const inputTiming = new TimingTrace(request.sessionId, 'desktop').span('delivery.first_input_ack');
+      firstInputTiming = inputTiming;
+      try {
+        const result = await helper.call<DeliveryResult & import('../shared/timing').TimingMeta>('windows.insert-text', request, deliveryTimeout(request.text));
+        // The timing allowlist removes all unapproved native result fields.
+        new TimingTrace(request.sessionId, 'desktop').span('delivery.path', {
+          method: result.method, fallbackReason: result.fallbackReason, errorCode: result.errorCode,
+          clipboardFormat: result.clipboardFormat, windowsError: result.windowsError,
+        }).end(result.status === 'sent' ? 'ok' : 'failed');
+        return result;
+      }
+      finally { inputTiming.end('skipped'); firstInputTiming = undefined; activeDelivery = null; }
     });
     ipcMain.handle('sargosh:delivery-cancel', async (event, sessionId: unknown) => {
       checkSender(event);
@@ -325,6 +399,7 @@ if (ownsLock) {
       if (activeDelivery === sessionId) await helper.call('windows.cancel-delivery', { sessionId });
     });
     handle('sargosh:recording-start', (shortcut: unknown) => {
+      if(storeUpdates?.installing)throw new Error('Wait for the app update to finish.');
       requireAccount();
       if (historyRetry || activeDelivery || recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Finish recording before changing shortcuts.');
       const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
@@ -333,11 +408,13 @@ if (ownsLock) {
     powerMonitor.on('suspend', () => stopOwner('The computer went to sleep. Any active recording was discarded.'));
 
     handle('sargosh:windows-start', (shortcut: unknown) => {
+      if(storeUpdates?.installing)throw new Error('Wait for the app update to finish.');
       if (historyRetry || activeDelivery || recordingBusy(recordingState) || transcriptionStatus.phase === 'working' || !dev || typeof shortcut !== 'string' || shortcut.length > 80) throw new Error('Invalid Windows test request.');
       const ignoredProcessIds = [...new Set([process.pid, ...webContents.getAllWebContents().map(contents => contents.getOSProcessId())])].filter(pid => pid > 0);
       return helper.call('windows.arm', { shortcut, ignoredProcessIds });
     });
     handle('sargosh:windows-action', (action: unknown) => {
+      if(action==='start-hands-free'&&storeUpdates?.installing)throw new Error('Wait for the app update to finish.');
       if (action === 'start-hands-free') requireAccount();
       if (action === 'start-hands-free' && historyRetry) throw new Error('Wait for the transcript retry to finish.');
       if (!['cancel', 'finish', 'start-hands-free', 'disarm'].includes(String(action))) throw new Error('Invalid recording action.');
@@ -361,22 +438,40 @@ if (ownsLock) {
     ipcMain.handle('sargosh:overlay-resize', (event, height: unknown) => {
       checkSender(event);
       if (event.sender !== overlayWindow?.webContents || !overlayWindow || typeof height !== 'number' || !Number.isFinite(height)) throw new Error('Invalid overlay size.');
-      const bounds = overlayWindow.getBounds();
-      const area = screen.getDisplayMatching(bounds).workArea;
-      overlayWindow.setBounds(resizeOverlayBounds(bounds, area, height));
+      overlayDocking?.resize(height);
     });
     handle('sargosh:open-settings', () => { showMain(); mainWindow?.webContents.send('sargosh:open-settings'); });
     ipcMain.handle('sargosh:window-theme', (event, theme: unknown) => {
       checkSender(event);
       if (event.sender !== mainWindow?.webContents || (theme !== 'light' && theme !== 'dark')) throw new Error('Invalid window theme.');
+      appliedWindowTheme=theme;
       if (process.platform === 'win32') mainWindow?.setTitleBarOverlay(titleBarAppearance(theme));
+      if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.webContents.send('sargosh:window-theme-changed',theme);
+      if(overlayWindow&&!overlayWindow.isDestroyed()&&!overlayDocking?.state.dragging)overlayZones.prepare(screen.getDisplayMatching(overlayWindow.getBounds()),theme);
+    });
+    handle('sargosh:window-theme-state',()=>appliedWindowTheme);
+    ipcMain.handle('sargosh:overlay-dock-state', event => {
+      checkSender(event);
+      if (event.sender !== overlayWindow?.webContents) throw new Error('Invalid overlay request.');
+      return overlayDocking?.state ?? DEFAULT_DOCK;
     });
     handle('sargosh:open-main', () => showMain());
-    handle('sargosh:move-overlay', ({ dx, dy }: { dx: number; dy: number }) => {
-      if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.abs(dx) > 500 || Math.abs(dy) > 500 || !overlayWindow) return;
-      const { x, y, width, height } = overlayWindow.getBounds();
-      const area = screen.getDisplayNearestPoint({ x, y }).workArea;
-      overlayWindow.setPosition(Math.round(Math.max(area.x, Math.min(x + dx, area.x + area.width - width))), Math.round(Math.max(area.y, Math.min(y + dy, area.y + area.height - height))));
+    ipcMain.handle('sargosh:overlay-drag', (event, request: { action: 'start' | 'stop'; pill?: OverlayGripBounds; reducedMotion?: boolean }) => {
+      checkSender(event);
+      if (event.sender !== overlayWindow?.webContents || !overlayWindow || overlayWindow.isDestroyed()) throw new Error('Invalid overlay drag.');
+      if (!request || !['start', 'stop'].includes(request.action)) throw new Error('Invalid overlay drag.');
+      if (request.action === 'stop') { overlayDrag?.stop(); return; }
+      overlayReducedMotion = request.reducedMotion === true;
+      if (!overlayDrag) {
+        const window = overlayWindow;
+        overlayDrag = new OverlayDrag({ bounds: () => window.getBounds(), cursor: () => screen.getCursorScreenPoint(),
+          area: point => screen.getDisplayNearestPoint(point).workArea, pressed: overlayMousePressed(),
+          move: (x, y) => window.setPosition(x, y, false), started: (pill, point) => overlayDocking?.start(pill, point),
+          moved: point => overlayDocking?.move(point), ended: point => overlayDocking?.end(point) });
+        window.once('closed', () => { overlayDrag?.stop(false); overlayDocking?.dispose(); });
+        window.webContents.on('did-start-loading', () => { overlayDrag?.stop(false); overlayDocking?.cancel(); });
+      }
+      if (request.pill) overlayDrag.start(request.pill);
     });
     handle('sargosh:status', async (): Promise<RuntimeStatus> => {
       try {
@@ -388,6 +483,48 @@ if (ownsLock) {
     await accountDeletion.recover();
     await auth.initialize();
     mainWindow = createWindow(); overlayWindow = createWindow(true);
+    const dockFile = path.join(app.getPath('userData'), 'overlay-dock.json');
+    let savedDock;
+    try { const value: unknown = JSON.parse(readFileSync(dockFile, 'utf8')); if (validDockPreference(value)) savedDock = value; } catch {}
+    const dockWindow = overlayWindow;
+    overlayDocking = new OverlayDocking({ bounds: () => dockWindow.getBounds(),
+      setBounds: bounds => { if (!dockWindow.isDestroyed()) dockWindow.setBounds(bounds, false); },
+      displays: () => screen.getAllDisplays(), primary: () => screen.getPrimaryDisplay(), displayAt: point => screen.getDisplayNearestPoint(point),
+      notify: state => { if (!dockWindow.isDestroyed()) dockWindow.webContents.send('sargosh:overlay-dock', state); },
+      guides: (display, target) => overlayZones.show(display, target, appliedWindowTheme), hideGuides: () => overlayZones.hide(),
+      reducedMotion: () => overlayReducedMotion,
+      save: preference => {
+        dockWrites = dockWrites.then(async () => { await mkdir(path.dirname(dockFile), { recursive: true });
+          await writeFile(dockFile + '.tmp', JSON.stringify(preference), { mode: 0o600 }); await rename(dockFile + '.tmp', dockFile);
+        }).catch(() => { console.warn('Overlay dock position could not be saved.'); });
+      }
+    }, savedDock);
+    overlayZones.prepare(screen.getDisplayMatching(dockWindow.getBounds()), appliedWindowTheme);
+    const reflowDock = () => overlayDocking?.reflow();
+    screen.on('display-removed', reflowDock); screen.on('display-metrics-changed', reflowDock);
+    const updateBridge=new NativeStoreBridge(path.join(process.resourcesPath,'sargosh-store-updater.exe'),()=>{
+      if(!mainWindow||mainWindow.isDestroyed())throw new Error('Window unavailable.');
+      const handle=mainWindow.getNativeWindowHandle();return (handle.length===8?handle.readBigUInt64LE():BigInt(handle.readUInt32LE())).toString();
+    });
+    storeUpdates=new StoreUpdates(!dev&&process.platform==='win32'&&process.windowsStore===true,updateBridge,
+      ()=>!startup.complete||accountChanging||quitting||Boolean(historyRetry||activeDelivery)||transcriber.busy||streamer.busy||transcriptionStatus.phase==='working'||recordingBusy(recordingState)||['pending','listening'].includes(windowsState.phase),
+      state=>{if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('sargosh:store-update',state);},
+      async()=>{
+        registerStoreRestart();
+        await helper.call('windows.set-busy',{busy:true});
+        // Windows ARR refuses automatic restart during a process's first minute.
+        // This wait occurs only after an explicit Restart to update click.
+        const restartDelay=Math.max(0,Math.ceil((60-process.uptime())*1000));
+        if(restartDelay)await new Promise<void>(resolve=>{const timer=setTimeout(resolve,restartDelay);timer.unref();});
+        await Promise.all([history?.drain(),authStorage?.drain()]);
+      },
+      async()=>{await helper.call('windows.set-busy',{busy:transcriptionStatus.phase==='working'||historyRetry!==null});},
+      aumid=>{
+        // Activate by package identity, never an executable path from the old MSIX.
+        app.relaunch({execPath:path.join(process.env.SystemRoot||'C:/Windows','explorer.exe'),args:['shell:AppsFolder\\'+aumid]});
+        app.quit();
+      });
+    storeUpdates.start();
     tray = new Tray(nativeImage.createFromPath(path.join(root, 'assets', 'app-icon.png')).resize({ width: 20, height: 20 }));
     tray.setToolTip('Sargosh');
     tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Open Sargosh', click: showMain }, { type: 'separator' }, { label: 'Quit Sargosh', click: () => app.quit() }]));
@@ -398,6 +535,8 @@ app.on('window-all-closed', () => { /* The tray owns the application lifetime. *
 app.on('before-quit', event => {
   if (quitting) { tray?.destroy(); return; }
   event.preventDefault(); quitting = true; startup.cancel(); closeSplash();
-  recordingCommands.cancelAll(); transcriber.cancelAll();
-  void Promise.all([history?.drain(), auth?.dispose(), authStorage?.drain()]).catch(() => {}).then(() => helper.stop()).finally(() => app.quit());
+  storeUpdates?.dispose();
+  overlayDrag?.stop(false); overlayDocking?.dispose(); overlayZones.dispose();
+  recordingCommands.cancelAll(); transcriber.cancelAll(); streamer.cancel();
+  void Promise.all([history?.drain(), auth?.dispose(), authStorage?.drain(), dockWrites]).catch(() => {}).then(() => helper.stop()).finally(() => app.quit());
 });

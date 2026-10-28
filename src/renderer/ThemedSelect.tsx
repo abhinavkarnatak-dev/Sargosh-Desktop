@@ -65,10 +65,10 @@ export function ThemedSelect({ id, label, value, options, disabled = false, plac
     <button type="button" ref={trigger} id={controlId} className="themed-select-trigger" data-tooltip={open ? '' : tooltip ?? (compact ? options[selected]?.label : '')} data-tooltip-placement="bottom" role="combobox" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined} aria-activedescendant={open ? optionId(active) : undefined} disabled={disabled || !options.length} onClick={() => open ? setOpen(false) : show()} onKeyDown={keyDown}>
       {compact ? triggerIcon : <><span>{options[selected]?.label ?? placeholder}</span><ChevronDown size={14} aria-hidden="true" /></>}
     </button>
-    {open && <div ref={menu} id={listId} role="listbox" aria-label={label ?? 'Options'} className="themed-select-menu" popover="manual">
+    <div ref={menu} id={listId} role={open ? "listbox" : undefined} inert={!open} aria-hidden={!open} aria-label={label ?? 'Options'} className="themed-select-menu" popover="manual">
       {options.map((option, index) => <div id={optionId(index)} key={option.value} role="option" aria-selected={option.value === value} className={'themed-select-option' + (index === active ? ' active' : '')} onMouseMove={() => setActive(index)} onPointerDown={event => event.preventDefault()} onClick={() => choose(index)}>
         {option.icon}<span>{option.label}</span>{option.value === value && <Check size={14} aria-hidden="true" />}
       </div>)}
-    </div>}
+    </div>
   </div>;
 }

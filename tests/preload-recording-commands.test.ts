@@ -46,9 +46,32 @@ it('routes recovery copy, resizing, and microphone settings through named deskto
   unsubscribe(); expect(electron.remove).toHaveBeenCalledWith('sargosh:open-settings', handler);
 });
 
+it('sends only drag start geometry and stop rather than per-movement screen deltas', async () => {
+  const pill = { x: 167.5, y: 68, width: 85, height: 40 };
+  await bridge.overlayDrag!('start', pill); await bridge.overlayDrag!('stop');
+  expect(electron.invoke).toHaveBeenCalledWith('sargosh:overlay-drag', { action: 'start', pill, reducedMotion: undefined });
+  expect(electron.invoke).toHaveBeenCalledWith('sargosh:overlay-drag', { action: 'stop', pill: undefined, reducedMotion: undefined });
+});
+
+it('gets and subscribes to dock layout through named channels with listener cleanup', async () => {
+  await bridge.overlayDockState!(); expect(electron.invoke).toHaveBeenCalledWith('sargosh:overlay-dock-state');
+  const listener = vi.fn(), unsubscribe = bridge.onOverlayDock!(listener);
+  const handler = electron.on.mock.calls.find(call => call[0] === 'sargosh:overlay-dock')![1];
+  handler({}, { position: 'left', dragging: false, target: null });
+  expect(listener).toHaveBeenCalledWith({ position: 'left', dragging: false, target: null });
+  unsubscribe(); expect(electron.remove).toHaveBeenCalledWith('sargosh:overlay-dock', handler);
+});
+
 it('sends only a resolved light or dark theme to the native title bar', async () => {
   await bridge.setWindowTheme('dark');
   expect(electron.invoke).toHaveBeenCalledWith('sargosh:window-theme', 'dark');
+});
+
+it('exposes a read-only resolved theme to the overlay and releases its theme listener',async()=>{
+  await bridge.windowTheme?.();expect(electron.invoke).toHaveBeenCalledWith('sargosh:window-theme-state');
+  const listener=vi.fn(),release=bridge.onWindowTheme!(listener);
+  const handler=electron.on.mock.calls[0][1];handler({},'dark');expect(listener).toHaveBeenCalledWith('dark');
+  release();expect(electron.remove).toHaveBeenCalledWith('sargosh:window-theme-changed',handler);
 });
 
 it('routes history actions through named channels and releases its update listener', async () => {

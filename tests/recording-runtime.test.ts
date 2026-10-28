@@ -331,3 +331,62 @@ it('keeps practice dictation inside onboarding instead of inserting into another
   expect(save).not.toHaveBeenCalled(); expect(update).not.toHaveBeenCalled();
   runtime.recording.clear(); runtime.setTutorialMode(false);
 });
+
+it('uses the combined cleanup result and inserts it once without a second cleanup request', async () => {
+  fake.transcribe.mockResolvedValueOnce({ text: 'Um original text', language: 'en', model: 'nova-3', durationMs: 1000, confidence: .9,
+    cleanup: { ok: true, result: { text: 'Combined final text', model: 'gemini-3.5-flash-lite' } } });
+  speaking(); await flush(); await runtime.finishRecording(); await flush();
+  await runtime.transcribeRecording(); await flush();
+  expect(fake.transcribe.mock.calls[0][5]).toBe(true);
+  expect(fake.cleanup).not.toHaveBeenCalled();
+  expect(bridge.deliverText).toHaveBeenCalledOnce();
+  expect(bridge.deliverText).toHaveBeenCalledWith(expect.objectContaining({ text: 'Combined final text' }));
+});
+it('retains the original transcript on combined cleanup failure and never pastes or automatically retries it', async () => {
+  fake.transcribe.mockResolvedValueOnce({ text: 'Um original text', language: 'en', model: 'nova-3', durationMs: 1000, confidence: .9,
+    cleanup: { ok: false, code: 'GEMINI_TIMEOUT', message: 'Cleanup took too long.' } });
+  speaking(); await flush(); await runtime.finishRecording(); await flush();
+  await runtime.transcribeRecording(); await flush();
+  expect(runtime.transcription.getState().result?.text).toBe('Um original text');
+  expect(runtime.cleanup.getState()).toMatchObject({ phase: 'failed', sessionId: 'session' });
+  expect(fake.cleanup).not.toHaveBeenCalled(); expect(bridge.deliverText).not.toHaveBeenCalled();
+});
+it('ignores a combined result that arrives after cancellation', async () => {
+  let resolve!: (value: unknown) => void;
+  fake.transcribe.mockReturnValueOnce(new Promise(yes => { resolve = yes; }));
+  speaking(); await flush(); await runtime.finishRecording(); await flush();
+  const pending = runtime.transcribeRecording(); await flush(); runtime.cancelRecording();
+  resolve({ text: 'Original', language: 'en', model: 'nova-3', durationMs: 1000, confidence: .9,
+    cleanup: { ok: true, result: { text: 'Late text', model: 'gemini-3.5-flash-lite' } } });
+  await pending; await flush(); expect(bridge.deliverText).not.toHaveBeenCalled(); expect(fake.cleanup).not.toHaveBeenCalled();
+});
+
+it('saves the cleanup error with the original transcript instead of claiming no transcript was prepared', async () => {
+  const saveHistory = vi.fn(async () => {}), updateHistory = vi.fn(async () => {});
+  Object.assign(bridge, { saveHistory, updateHistory });
+  const arrayBuffer = vi.spyOn(Blob.prototype, 'arrayBuffer').mockResolvedValue(new ArrayBuffer(11));
+  try {
+    fake.transcribe.mockResolvedValueOnce({ text: 'Original transcript', language: 'en', model: 'nova-3', durationMs: 1000, confidence: .9,
+      cleanup: { ok: false, code: 'GEMINI_INCOMPLETE', message: 'Cleanup did not finish. Original transcript available.' } });
+    runtime.transcription.configure({ automatic: true }); speaking(); await flush(); await runtime.finishRecording(); await flush(); await flush();
+    expect(updateHistory).toHaveBeenCalledWith(expect.objectContaining({ text: 'Original transcript', originalText: 'Original transcript', status: 'failed', error: 'Cleanup did not finish. Original transcript available.' }));
+    expect(bridge.deliverText).not.toHaveBeenCalled();
+  } finally { arrayBuffer.mockRestore(); }
+});
+
+it('streams during recording, flushes the final packet, and uses the combined result without a second upload or cleanup',async()=>{
+ const start=vi.fn(async()=>({ok:true,maxAudioSeconds:300}));
+ const chunk=vi.fn(async()=>true);
+ const finish=vi.fn(async()=>({ok:true,result:{text:'Raw final words',language:'en',model:'nova-3',durationMs:1000,confidence:null,cleanup:{ok:true,result:{text:'Final cleaned words.',model:'gpt-6-luna',serviceTier:'fast'}}}}));
+ Object.assign(bridge,{startStream:start,streamChunk:chunk,finishStream:finish,cancelStream:vi.fn(async()=>{})});
+ vi.resetModules();runtime=await import('../src/renderer/audio/runtime');runtime.initializeRecording();await flush();
+ speaking();await flush();
+ const pcm=fake.open.mock.calls[0][4] as (audio:ArrayBuffer)=>void;
+ expect(start).toHaveBeenCalledOnce();pcm(new ArrayBuffer(3200));await flush();
+ expect(chunk).toHaveBeenCalledOnce();expect(fake.transcribe).not.toHaveBeenCalled();expect(finish).not.toHaveBeenCalled();
+ fake.finish.mockImplementationOnce(async()=>{pcm(new ArrayBuffer(1600));return new Blob(['complete clip'],{type:'audio/webm'});});
+ commandListener('finish');for(let i=0;i<8;i++)await flush();
+ expect(chunk).toHaveBeenCalledTimes(2);expect(finish).toHaveBeenCalledOnce();expect(fake.transcribe).not.toHaveBeenCalled();expect(fake.cleanup).not.toHaveBeenCalled();
+ expect(runtime.cleanup.getState()).toMatchObject({phase:'completed',result:{text:'Final cleaned words.'}});
+ expect(bridge.deliverText).toHaveBeenCalledWith(expect.objectContaining({text:'Final cleaned words.'}));
+});

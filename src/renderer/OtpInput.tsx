@@ -19,7 +19,7 @@ export function OtpInput({ id, value, disabled, inputRef, onChange, onInvalid }:
   }, [value, inputRef]);
   const active = Math.min(selection.start, 5);
   return <div className={'otp-input' + (disabled ? ' disabled' : '')}>
-    <div className="otp-digits" aria-hidden="true">{Array.from({ length: 6 }, (_, index) => <span key={index} className="otp-digit" data-active={index === active} data-selected={selection.end > selection.start && index >= selection.start && index < selection.end}>{value[index] ?? ''}</span>)}</div>
+    <div className="otp-digits" aria-hidden="true">{Array.from({ length: 6 }, (_, index) => <span key={index} className="otp-digit" data-active={index === active} data-filled={Boolean(value[index])} data-selected={selection.end > selection.start && index >= selection.start && index < selection.end}>{value[index] ?? ''}{index===active && selection.start===selection.end && selection.start<6 && <span className="otp-caret" />}</span>)}</div>
     <input ref={inputRef} id={id} className="otp-native-input" type="text" inputMode="numeric" autoComplete="one-time-code" spellCheck={false} pattern="[0-9]{6}" maxLength={6} required value={value} disabled={disabled} autoFocus aria-describedby={id + '-help'}
       onChange={event => {
         const raw = event.currentTarget.value, next = raw.replace(/[^0-9]/g, '');

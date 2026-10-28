@@ -9,3 +9,18 @@ it('shows remaining time and accessible progress without rounding a partial minu
  try{await act(async()=>root.render(createElement(UsagePanel)));expect(host.textContent).toContain('8m 30s remaining');expect(host.querySelectorAll('progress')).toHaveLength(2);expect(host.textContent).toContain('98m 0s remaining');}
  finally{await act(async()=>root.unmount());host.remove();delete window.sargosh;vi.unstubAllGlobals();}
 });
+
+it.each(['local','browser','failed'] as const)('explains unavailable usage instead of rendering a blank %s page',async(mode)=>{
+ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
+ if(mode!=='browser')window.sargosh={usage:mode==='failed'?vi.fn().mockRejectedValue(new Error('Offline')):async()=>null} as unknown as NonNullable<typeof window.sargosh>;
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{
+ await act(async()=>root.render(createElement(UsagePanel)));
+ expect(host.querySelector('section')).not.toBeNull();expect(host.querySelectorAll('progress')).toHaveLength(0);
+ expect(host.textContent).toContain(mode==='local'?'Usage is not tracked by the local development server.':mode==='browser'?'Open the Sargosh desktop app':'Could not load your allowance.');
+ if(mode==='failed'){
+ window.sargosh!.usage=async()=>({enabled:true,dailyLimitSeconds:600,monthlyLimitSeconds:6000,dailyUsedSeconds:0,monthlyUsedSeconds:0,dailyResetAt:'2026-10-30T00:00:00Z',monthlyResetAt:'2026-11-01T00:00:00Z'});
+ await act(async()=>(host.querySelector('button') as HTMLButtonElement).click());expect(host.querySelectorAll('progress')).toHaveLength(2);expect(host.textContent).not.toContain('Could not load');
+ }
+ }finally{await act(async()=>root.unmount());host.remove();delete window.sargosh;vi.unstubAllGlobals();}
+});

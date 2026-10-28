@@ -56,11 +56,14 @@ export function Tooltips() {
   }, [id]);
   useLayoutEffect(() => {
     if (!tip || tip.closing || !bubble.current) return;
-    const anchor = tip.anchor.getBoundingClientRect(), bounds = bubble.current.getBoundingClientRect();
-    const place = tip.anchor.dataset.tooltipPlacement ?? 'top';
+    const dock = tip.anchor.closest<HTMLElement>('.overlay-stage')?.dataset.dock;
+    const control = dock ? tip.anchor.closest('.overlay-pill') : null;
+    const anchor = (control ?? tip.anchor).getBoundingClientRect(), bounds = bubble.current.getBoundingClientRect();
+    const place = tip.anchor.dataset.tooltipPlacement ?? (dock === 'left' ? 'right' : dock === 'right' ? 'left' : 'top');
     let left = anchor.left + (anchor.width - bounds.width) / 2;
     let top = anchor.top - bounds.height - 9;
     if (place === 'right') { left = anchor.right + 10; top = anchor.top + (anchor.height - bounds.height) / 2; if (left + bounds.width > window.innerWidth - 8) left = anchor.left - bounds.width - 10; }
+    else if (place === 'left') { left = anchor.left - bounds.width - 10; top = anchor.top + (anchor.height - bounds.height) / 2; if (left < 8) left = anchor.right + 10; }
     else if (place === 'bottom' || top < 8) { top = anchor.bottom + 9; if (top + bounds.height > window.innerHeight - 8) top = anchor.top - bounds.height - 9; }
     setPosition({ left: Math.max(8, Math.min(left, window.innerWidth - bounds.width - 8)), top: Math.max(8, Math.min(top, window.innerHeight - bounds.height - 8)) });
   }, [tip]);

@@ -1,0 +1,9 @@
+{
+  "name": "AbhinavKarnatak.Sargosh",
+  "publisher": "CN=802770BA-7032-41C1-B78E-998062099EAB",
+  "publisherDisplayName": "Abhinav Karnatak",
+  "displayName": "Sargosh",
+  "applicationId": "Sargosh",
+  "minVersion": "10.0.19041.0",
+  "maxVersionTested": "10.0.26100.0"
+}

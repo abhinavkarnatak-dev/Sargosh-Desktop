@@ -34,7 +34,7 @@ beforeEach(() => {
   } as unknown as NonNullable<typeof window.sargosh>;
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete window.sargosh; vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete window.sargosh; vi.useRealTimers(); vi.unstubAllGlobals(); });
 async function render() { await act(async () => root.render(createElement(Overlay))); }
 async function press(label: string, button = 0) {
   const element = host.querySelector(`[aria-label="${label}"]`);
@@ -52,6 +52,28 @@ it('starts hands-free from the idle overlay', async () => {
   await act(async () => host.querySelector('.overlay-pill')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
   await press('Start hands-free recording');
   expect(windowsAction).toHaveBeenCalledExactlyOnceWith('start-hands-free');
+});
+
+it.each(['left', 'right', 'bottom'] as const)('keeps recording controls and notices in the %s dock', async position => {
+  window.sargosh!.overlayDockState = async () => ({ position, dragging: false, target: null });
+  await render();
+  expect(host.querySelector('.overlay-stage')?.getAttribute('data-dock')).toBe(position);
+  expect(host.querySelector('[aria-label="Cancel recording"]')).not.toBeNull();
+  expect(host.querySelector('[aria-label="Finish recording"]')).not.toBeNull();
+  await act(async () => updateAudio({ ...audio, quiet: true, revision: 2 }));
+  expect(host.querySelector('.overlay-notice-wrap')).not.toBeNull();
+  await press('Finish recording'); expect(recordingAction).toHaveBeenCalledExactlyOnceWith('finish');
+});
+
+it('uses a circular-dot idle marker and follows dock updates without routing a recording action', async () => {
+  let updateDock!: (state: import('../src/shared/overlay-dock').DockState) => void;
+  audio = { ...INITIAL_RECORDING_STATE, revision: 1 };
+  window.sargosh!.onOverlayDock = listener => { updateDock = listener; return () => {}; };
+  await render();
+  expect(host.querySelector('.idle-line')).not.toBeNull();
+  await act(async () => updateDock({ position: 'right', dragging: false, target: null }));
+  expect(host.querySelector('.overlay-stage')?.getAttribute('data-dock')).toBe('right');
+  expect(recordingAction).not.toHaveBeenCalled(); expect(windowsAction).not.toHaveBeenCalled();
 });
 it.each([['Cancel recording', 'cancel'], ['Finish recording', 'finish']])('routes %s to the recording owner', async (label, action) => {
   await render(); await press(label);
@@ -117,6 +139,7 @@ it('shows recorder failures and cancellation above the overlay', async () => {
   expect(host.querySelector('.overlay-notice')?.textContent).toContain('Recording cancelled');
 });
 it('shows recovered text and copies only on an explicit click', async () => {
+  vi.useFakeTimers();
   audio = { ...audio, phase: 'ready' };
   speech = { phase: 'failed', message: 'Missing input', notice: { id: 'recovery-1', kind: 'recovery', title: 'Your text is ready', message: 'Copy it below.', text: 'My prepared text.' } };
   await render(); expect(host.querySelector('.overlay-recovery-text')?.textContent).toBe('My prepared text.');
@@ -124,7 +147,10 @@ it('shows recovered text and copies only on an explicit click', async () => {
   await act(async () => (host.querySelector('.overlay-notice-actions button') as HTMLButtonElement).click());
   expect(copyOverlayText).toHaveBeenCalledExactlyOnceWith('recovery-1');
   expect(host.querySelector('.overlay-notice-actions button')?.textContent).toBe('Copied');
-  await press('Dismiss notification'); expect(host.querySelector('.overlay-recovery-text')).toBeNull();
+  await press('Dismiss notification');
+  expect(host.querySelector('.overlay-notice')?.getAttribute('data-closing')).toBe('true');
+  await act(async () => vi.advanceTimersByTime(180));
+  expect(host.querySelector('.overlay-recovery-text')).toBeNull();
 });
 it('explains a failed copy and clears old recovery text as a new recording starts', async () => {
   audio = { ...audio, phase: 'ready' };

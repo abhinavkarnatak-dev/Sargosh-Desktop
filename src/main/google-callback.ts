@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { COMPLETION_CSP, googleCompletionPage } from './google-completion-page';
+export const GOOGLE_COMPLETION_URL = 'https://sargosh.abhinavkarnatak.com/auth/complete';
 export const GOOGLE_CALLBACK_ORIGIN = 'http://127.0.0.1:48123';
 export class GoogleCallback {
   constructor(private port = 48123) {}
@@ -15,7 +16,7 @@ export class GoogleCallback {
       if (!claimed && url.pathname === callbackPath && url.searchParams.has('error')) { claimed = true; reply.end(googleCompletionPage(false)); this.close(); onTimeout(); return; }
       if (claimed || url.pathname !== callbackPath || !code || code.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(code)) { reply.writeHead(400); reply.end('Sign-in did not finish. Return to Sargosh and try again.'); return; }
       claimed = true;
-      void onCode(code).then(() => reply.end(googleCompletionPage(true)), () => { reply.writeHead(400); reply.end(googleCompletionPage(false)); }).finally(() => this.close());
+      void onCode(code).then(() => { reply.writeHead(303, { Location: GOOGLE_COMPLETION_URL, 'Content-Length': '0' }); reply.end(); }, () => { reply.writeHead(400); reply.end(googleCompletionPage(false)); }).finally(() => this.close());
     });
     this.server = server;
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(this.port, '127.0.0.1', () => { port = (server.address() as import('node:net').AddressInfo).port; server.removeListener('error', reject); resolve(); }); });

@@ -1,3 +1,4 @@
+import type { CleanupResult } from './cleanup';
 import type { OverlayNotice } from './overlay-notice';
 export const STT_LANGUAGES = [
   { value: 'en', label: 'English' }, { value: 'hi', label: 'Hindi' },
@@ -5,7 +6,9 @@ export const STT_LANGUAGES = [
 ] as const;
 export type SpeechLanguage = typeof STT_LANGUAGES[number]['value'];
 export const isSpeechLanguage = (value: unknown): value is SpeechLanguage => STT_LANGUAGES.some(item => item.value === value);
+export type DictationCleanup = { ok: true; result: CleanupResult } | { ok: false; code: string; message: string };
 export interface Transcript {
+  cleanup?: DictationCleanup;
   text: string; language: SpeechLanguage; model: 'nova-3'; durationMs: number; confidence: number | null;
 }
 export type TranscriptionPhase = 'idle' | 'working' | 'completed' | 'failed' | 'cancelled';
@@ -17,7 +20,7 @@ export const INITIAL_TRANSCRIPTION: TranscriptionState = {
   phase: 'idle', message: '', sessionId: null, result: null, language: 'en', automatic: true
 };
 export interface TranscriptionRequest {
-  practice?: boolean; requestId: string; audio: ArrayBuffer; mimeType: string; language: SpeechLanguage;
+  traceId?: string; practice?: boolean; cleanup?: boolean; requestId: string; audio: ArrayBuffer; mimeType: string; language: SpeechLanguage;
 }
 export const isRequestId = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(value);
 export const AUDIO_TYPES = ['audio/webm', 'audio/ogg', 'audio/wav', 'audio/mpeg', 'audio/mp4'];

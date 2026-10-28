@@ -59,3 +59,16 @@ it('enables automatic transcription by default for normal dictation', () => {
   const controller = new TranscriptionController(vi.fn());
   expect(controller.getState().automatic).toBe(true);
 });
+
+it('marks a partial combined result as failed in diagnostics while retaining its original transcript', async () => {
+  const { setTimingSink } = await import('../src/shared/timing');
+  const events: import('../src/shared/timing').TimingEvent[] = [];
+  setTimingSink(event => events.push(event));
+  try {
+    const controller = new TranscriptionController(async () => ({ ...result, cleanup: { ok: false, code: 'GEMINI_INCOMPLETE', message: 'Cleanup incomplete.' } }));
+    await controller.start('session', new Blob(['audio']), true);
+    expect(controller.getState()).toMatchObject({ phase: 'completed', result: { text: 'Hello there.' } });
+    expect(events).toContainEqual(expect.objectContaining({ stage: 'dictation.transport', outcome: 'failed', errorCode: 'GEMINI_INCOMPLETE' }));
+    expect(JSON.stringify(events)).not.toContain('Hello there.');
+  } finally { setTimingSink(event => console.info(JSON.stringify(event))); }
+});

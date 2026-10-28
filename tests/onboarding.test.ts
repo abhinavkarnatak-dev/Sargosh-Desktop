@@ -23,8 +23,13 @@ it('walks through microphone, saved shortcut, and real-practice controls, persis
   await click('Start recording');expect(fake.start).toHaveBeenCalledOnce();
   fake.clean={phase:'completed',sessionId:'practice',result:{text:'Hi, I am trying Sargosh.'}};
   await act(async()=>root.render(createElement(Harness)));expect(host.querySelector('textarea')!.value).toBe('Hi, I am trying Sargosh.');
-  fake.complete.mockRejectedValueOnce(new Error('Setup could not be saved. Please try again.'));await click('Finish setup');expect(host.textContent).toContain('Setup could not be saved');
-  await click('Finish setup');expect(fake.complete).toHaveBeenCalledTimes(2);
- }finally{await act(async()=>root.unmount());host.remove();delete window.sargosh;vi.unstubAllGlobals();}
+  vi.useFakeTimers();
+  fake.complete.mockRejectedValueOnce(new Error('Setup could not be saved. Please try again.'));await click('Finish setup');
+  expect(host.querySelector('dialog')!.dataset.closing).toBe('true');expect(fake.complete).not.toHaveBeenCalled();
+  await act(async()=>vi.advanceTimersByTimeAsync(180));
+  expect(host.textContent).toContain('Setup could not be saved');expect(host.querySelector('dialog')!.dataset.closing).toBe('false');
+  await click('Finish setup');expect(fake.complete).toHaveBeenCalledTimes(1);
+  await act(async()=>vi.advanceTimersByTimeAsync(180));expect(fake.complete).toHaveBeenCalledTimes(2);
+ }finally{await act(async()=>root.unmount());host.remove();delete window.sargosh;vi.useRealTimers();vi.unstubAllGlobals();}
  expect(fake.mode).toHaveBeenLastCalledWith(false);expect(fake.clear).toHaveBeenCalled();
 });

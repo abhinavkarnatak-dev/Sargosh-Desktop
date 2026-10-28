@@ -1,4 +1,5 @@
 import { INITIAL_DELIVERY, type DeliveryRequest, type DeliveryResult, type DeliveryState } from '../../shared/delivery';
+import { TimingTrace } from '../../shared/timing';
 export class DeliveryController {
   private state = { ...INITIAL_DELIVERY };
   private listeners = new Set<() => void>();
@@ -12,13 +13,16 @@ export class DeliveryController {
     if (this.active || this.attempted.has(request.sessionId)) return;
     this.attempted.add(request.sessionId);
     const abort = new AbortController(); this.active = abort;
+    const timing = new TimingTrace(request.sessionId, 'desktop').span('delivery.total', { characters: request.text.length }, abort.signal);
     this.update({ phase: 'working', sessionId: request.sessionId, message: 'Preparing text...' });
     try {
       const result = await this.send(request, abort.signal);
       if (this.active !== abort) return;
       this.active = undefined;
+      timing.end(result.status === 'sent' ? 'ok' : 'failed');
       this.update({ phase: result.status === 'sent' ? 'completed' : 'failed', sessionId: request.sessionId, message: result.message });
     } catch {
+      timing.end(abort.signal.aborted ? 'cancelled' : 'failed');
       if (this.active !== abort) return;
       this.active = undefined;
       this.update({ phase: 'failed', sessionId: request.sessionId, message: 'Insertion could not be confirmed. Check your textbox before trying again. Your transcript is still available.' });

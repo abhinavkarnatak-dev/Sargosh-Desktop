@@ -29,7 +29,7 @@ export class Helper {
     createInterface({ input: this.child.stdout }).on('line', line => {
       try {
         const response = JSON.parse(line) as { id: number; error?: string; result?: unknown; event?: string; data?: unknown };
-        if (response.event === 'windows.state') {
+        if (response.event === 'windows.state' || response.event === 'windows.delivery-first-input') {
           for (const listener of this.listeners) listener(response.event, response.data);
           return;
         }

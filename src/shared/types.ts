@@ -11,6 +11,15 @@ export interface DayActivity { date: string; words: number }
 export interface Snapshot { preferences: Preferences; history: HistoryEntry[]; activity: DayActivity[]; totalWords: number; recordingCount: number; totalDurationMs: number }
 export interface RuntimeStatus { desktop: boolean; helper: boolean; api: boolean; auth: boolean; stt: boolean; cleanup: boolean }
 export interface DesktopBridge {
+  storeUpdateState?():Promise<import('./store-update').StoreUpdateState>;
+  storeUpdateAction?(action:import('./store-update').StoreUpdateAction):Promise<import('./store-update').StoreUpdateState>;
+  onStoreUpdate?(listener:(state:import('./store-update').StoreUpdateState)=>void):()=>void;
+  startStream?(request:import('./streaming').StreamRequest):Promise<import('./streaming').StreamStart & {maxAudioSeconds?:number}>;
+  streamChunk?(id:string,audio:ArrayBuffer):Promise<boolean>;
+  finishStream?(id:string):Promise<import('./streaming').StreamResult>;
+  cancelStream?(id:string):Promise<void>;
+  reportTiming?(event: import('./timing').TimingEvent): Promise<void>;
+  onDeliveryFirstInput?(listener: (sessionId: string) => void): () => void;
   startupReady?(): void;
   usage?(): Promise<import('./usage').AccountUsage|null>;
   authState(): Promise<import('./auth').AuthState>;
@@ -32,6 +41,10 @@ export interface DesktopBridge {
   copyHistoryText(id: string): Promise<void>;
   onHistoryChanged(listener: () => void): () => void;
   setWindowTheme(theme: 'light' | 'dark'): Promise<void>;
+  windowTheme?():Promise<'light'|'dark'>;
+  onWindowTheme?(listener:(theme:'light'|'dark')=>void):()=>void;
+  overlayDockState?(): Promise<import('./overlay-dock').DockState>;
+  onOverlayDock?(listener: (state: import('./overlay-dock').DockState) => void): () => void;
   copyOverlayText(noticeId: string): Promise<void>;
   resizeOverlay(height: number): Promise<void>;
   openSettings(): Promise<void>;
@@ -61,7 +74,7 @@ export interface DesktopBridge {
   preferences(update: Partial<Preferences>): Promise<Preferences>;
   status(): Promise<RuntimeStatus>;
   openMain(): Promise<void>;
-  moveOverlay(dx: number, dy: number): Promise<void>;
+  overlayDrag?(action: 'start' | 'stop', pill?: { x: number; y: number; width: number; height: number }, reducedMotion?: boolean): Promise<void>;
   deleteEntry(id: string): Promise<void>;
 }
 export const DEFAULT_PREFERENCES: Preferences = { theme: 'system', microphoneId: 'default', collapsed: false, shortcut: 'Control+Alt+Space' };

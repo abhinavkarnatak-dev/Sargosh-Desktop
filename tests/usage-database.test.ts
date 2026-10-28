@@ -8,6 +8,7 @@ beforeAll(async()=>{
  create schema auth;create table auth.users(id uuid primary key,email_confirmed_at timestamptz);
  insert into auth.users values('${user}',now()),('${other}',now());`);
  await db.exec(readFileSync('supabase/migrations/202610260002_usage_limits.sql','utf8'));
+ await db.exec(readFileSync('supabase/migrations/202610280001_streaming_usage.sql','utf8'));
 },20000);
 afterAll(async()=>{await db?.close();});
 async function reserve(id:string,seconds=100,owner=user,kind='stt',cost=1000){return (await db.query<{result:{code:string;leaseId:string;resetAt?:string}}>("select public.reserve_usage($1,$2,$3,$4,$5,$6) result",[owner,id,kind,fp,seconds,cost])).rows[0].result;}
@@ -61,4 +62,21 @@ it('retains spending totals after account deletion and rejects further reservati
  await db.query('delete from auth.users where id=$1',[deleted]);
  expect((await db.query<{cost:number}>('select sum(cost_micro)::integer cost from sargosh_private.usage_operations')).rows[0].cost).toBe(1000);
  expect((await reserve('after-delete',1,deleted)).code).toBe('AUTH_REQUIRED');
+});
+
+it('settles a reserved live window to server-counted seconds without accepting stale leases or excess costs',async()=>{
+ await reset();
+ const result=(await db.query<{r:{code:string;leaseId:string}}>("select public.reserve_stream_usage($1,'live','stt',$2,300,46000) r",[user,fp])).rows[0].r;
+ expect(result.code).toBe('OK');await dispatch('live',result.leaseId);
+ await db.exec("update sargosh_private.usage_operations set dispatched_at=now()-interval '3 minutes'");
+ expect((await reserve('while-live',1)).code).toBe('BUSY');
+ const settle=async(lease:string,seconds:number,cost:number)=>(await db.query<{ok:boolean}>("select public.finish_stream_usage($1,'live','stt',$2,$3,$4) ok",[user,lease,seconds,cost])).rows[0].ok;
+ expect(await settle('00000000-0000-4000-8000-000000000000',7,1074)).toBe(false);
+ expect(await settle(result.leaseId,301,46001)).toBe(false);
+ expect(await settle(result.leaseId,7,1074)).toBe(true);
+ expect(await settle(result.leaseId,0,0)).toBe(false);
+ const usage=(await db.query<{r:{dailyUsedSeconds:number}}>("select public.account_usage($1) r",[user])).rows[0].r;
+ expect(usage.dailyUsedSeconds).toBe(7);
+ expect((await reserve('after-live',1)).code).toBe('OK');
+ const permission=await db.query<{blocked:boolean}>("select not has_function_privilege('authenticated','public.finish_stream_usage(uuid,text,text,uuid,integer,bigint)','EXECUTE') blocked");expect(permission.rows[0].blocked).toBe(true);
 });

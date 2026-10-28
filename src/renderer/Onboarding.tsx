@@ -1,4 +1,5 @@
 import { useMicrophones } from './useMicrophones';
+import { SidebarLogo } from './SidebarLogo';
 import { shortcutLabel } from '../shared/shortcut-label';
 import { useEffect, useRef, useState } from 'react';
 import { Mic, Square, X } from 'lucide-react';
@@ -11,15 +12,20 @@ import { recordingBusy } from '../shared/recording';
 import { STT_LANGUAGES, isSpeechLanguage } from '../shared/transcription';
 import type { Preferences } from '../shared/types';
 import { cancelRecording, cloudBusy, finishRecording, recording, setTutorialMode, startRecording, transcription, useCleanup, useRecording, useTranscription } from './audio/runtime';
-const EXAMPLE = 'Hi, I am trying Sargosh. This is my first dictation.';
+const EXAMPLE = 'With Sargosh, I can turn my thoughts into text.';
 export function Onboarding({ preferences, onSave }: { preferences: Preferences; onSave(update: Partial<Preferences>): Promise<void> }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [step, setStep] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const exit = useRef<{ timer: ReturnType<typeof setTimeout>; resolve(value: boolean): void } | null>(null);
+  useEffect(() => () => {
+    if (exit.current) { clearTimeout(exit.current.timer); exit.current.resolve(false); exit.current = null; }
+  }, []);
   const [devices, setDevices] = useMicrophones();
   const audio = useRecording(), speech = useTranscription(), clean = useCleanup();
   const listening = recordingBusy(audio), processing = speech.phase === 'working' || clean.phase === 'working' || cloudBusy();
-  const blocked = busy || listening || processing;
+  const blocked = busy || closing || listening || processing;
   const stoppedPractice = useRef<string | null>(null);
   useEffect(() => {
     // Leave room for the final audio chunk below the server's 20-second ceiling.
@@ -45,14 +51,23 @@ export function Onboarding({ preferences, onSave }: { preferences: Preferences; 
     setBusy(true); setError('');
     try {
       if (step === 1 || step === 2) await activateShortcuts(preferences.shortcut);
-      if (step === 2) await window.sargosh!.completeOnboarding();
+      if (step === 2) {
+        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          setClosing(true);
+          const finished = await new Promise<boolean>(resolve => {
+            exit.current = { resolve, timer: setTimeout(() => { exit.current = null; resolve(true); }, 180) };
+          });
+          if (!finished) return;
+        }
+        await window.sargosh!.completeOnboarding();
+      }
       else setStep(value => value + 1);
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Setup could not continue. Please try again.'); }
+    } catch (failure) { setClosing(false); setError(failure instanceof Error ? failure.message : 'Setup could not continue. Please try again.'); }
     finally { setBusy(false); }
   }
   const result = clean.phase === 'completed' && clean.sessionId === speech.sessionId ? clean.result?.text : '';
-  return <dialog ref={dialog} className="onboarding-dialog" aria-labelledby="onboarding-title" onCancel={event => event.preventDefault()}>
-    <div className="onboarding-header"><img className="brand-dark" src="./brand/logo-dark.png" alt="Sargosh" /><img className="brand-light" src="./brand/logo-light.png" alt="Sargosh" /><span>LET’S GET YOU SET UP</span></div>
+  return <dialog ref={dialog} className="onboarding-dialog animated-modal" data-closing={closing} aria-labelledby="onboarding-title" onCancel={event => event.preventDefault()}>
+    <div className="onboarding-header"><SidebarLogo /><span>LET’S GET YOU SET UP</span></div>
     <ol className="onboarding-steps" aria-label="Setup progress">{['Microphone', 'Shortcut', 'Try dictation'].map((label, index) => <li key={label} aria-current={step === index ? 'step' : undefined} className={index <= step ? 'reached' : ''}><span>{index + 1}</span>{label}</li>)}</ol>
     <div className="onboarding-body" key={step}>
       <h2 id="onboarding-title">{['Let us hear you.', 'Choose your shortcut.', 'Your first words with Sargosh.'][step]}</h2>
@@ -66,7 +81,7 @@ export function Onboarding({ preferences, onSave }: { preferences: Preferences; 
         {speech.phase === 'completed' && speech.result && !speech.result.text.trim() && <p className="inline-help" role="status">No speech was detected. Check your microphone and try again.</p>}
         {result && <label className="onboarding-result">Your practice transcript<textarea readOnly value={result} rows={3}/></label>}
         {(audio.phase === 'failed' || speech.phase === 'failed' || clean.phase === 'failed') && <p role="alert" className="error-message">{audio.phase === 'failed' ? audio.message : speech.phase === 'failed' ? speech.message : clean.message}</p>}
-        <p className="onboarding-cloud-note">Practice is separate: three attempts of up to 20 seconds, with no deduction from your dictation allowance or contribution to history and Insights. Audio is processed by Deepgram and text by Google Gemini. Transcription and cleanup happen automatically.</p>
+        <p className="onboarding-cloud-note">Practice is separate: three attempts of up to 20 seconds, with no deduction from your dictation allowance or contribution to history and Insights.</p>
       </>}
     </div>
     {error && <p className="error-message" role="alert">{error}</p>}

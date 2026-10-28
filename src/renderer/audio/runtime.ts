@@ -1,3 +1,5 @@
+import { RecordingCues, createCuePlayer } from './recording-cues';
+import { StreamingCapture } from './streaming';
 import { setPracticeSession } from './practice';
 import { savedHistory } from './history';
 import { DeliveryController, deliveryTransport } from './delivery';
@@ -12,6 +14,7 @@ import { cleanupTransport } from './cleanup-transport';
 import { TranscriptionController } from './transcription';
 import { transcriptionTransport } from './transcription-transport';
 import { recordingBusy } from '../../shared/recording';
+import { initializeTimingOutput, markFirstInput, finishDictationTiming } from './timing';
 
 let preferences: Preferences = DEFAULT_PREFERENCES;
 let native: WindowsState | undefined;
@@ -37,13 +40,19 @@ export async function cleanupTranscript() {
   const state = transcription.getState();
   if (state.phase === 'completed' && state.sessionId && state.result && !cloudBusy()) await cleanup.start(state.sessionId, state.result.text, state.result.language);
 }
-export const transcription = new TranscriptionController(transcriptionTransport);
+const streaming = new StreamingCapture(()=>window.sargosh,()=>{void finishRecording();});
+export const transcription = new TranscriptionController(async(blob,language,requestId,signal,traceId,clean)=>{
+  if(traceId && streaming.handles(traceId)){
+    const result=await streaming.finish(traceId,signal);if(result)return result;
+  }
+  return transcriptionTransport(blob,language,requestId,signal,traceId,clean);
+});
 export const useTranscription = () => useSyncExternalStore(transcription.subscribe, transcription.getState);
 export async function transcribeRecording() {
   const state = recording.getState(); const blob = recording.getClip();
-  if (state.phase === 'ready' && state.sessionId && blob && !cloudBusy()) await transcription.start(state.sessionId, blob);
+  if (state.phase === 'ready' && state.sessionId && blob && !cloudBusy()) await transcription.start(state.sessionId, blob, cleanup.getState().enabled);
 }
-export const recording = new RecordingController(new BrowserAudioBackend(), () => performance.now(), () => { void finishRecording(); });
+export const recording = new RecordingController(new BrowserAudioBackend(), () => performance.now(), () => { void finishRecording(); }, window.sargosh?.startStream ? (id,audio)=>streaming.push(id,audio) : undefined);
 export const useRecording = () => useSyncExternalStore(recording.subscribe, recording.getState);
 export function setRecordingPreferences(value: Preferences) { preferences = value; }
 export async function finishRecording() {
@@ -61,6 +70,7 @@ export async function finishRecording() {
   } else await recording.finish();
 }
 export function cancelRecording() {
+  streaming.cancel();
   const preparing = savingForTranscription; savingForTranscription = null;
   if (preparing) transcription.cancelPreparation(preparing);
   delivery.cancel();
@@ -84,8 +94,15 @@ export async function startRecording() {
 export function initializeRecording() {
   if (initialized) return;
   initialized = true;
+  initializeTimingOutput();
+  const cues=new RecordingCues(createCuePlayer());
+  window.sargosh?.onDeliveryFirstInput?.(markFirstInput);
   recording.subscribe(() => {
     const state = recording.getState();
+    cues.observe(state);
+    if(state.sessionId!==sourceSession && state.sessionId && !tutorialMode && transcription.getState().automatic && state.phase==='opening')streaming.prepare(state.sessionId,transcription.getState().language,cleanup.getState().enabled);
+    if(state.phase==='recording'&&state.sessionId)streaming.activate(state.sessionId);
+    if(['idle','cancelled','failed'].includes(state.phase))streaming.cancel();
     if (state.sessionId !== sourceSession) { sourceSession = state.sessionId; savingForTranscription = null; recovery = null; delivery.clear(); transcription.clear(); }
     if (['idle', 'cancelled', 'failed'].includes(state.phase)) { delivery.clear(); transcription.clear(); }
     void window.sargosh?.reportRecording(state).catch(() => {});
@@ -122,7 +139,7 @@ export function initializeRecording() {
     const originalText = speech.result?.text ?? '';
     const text = clean.phase === 'completed' && clean.sessionId === audio.sessionId ? clean.result?.text ?? originalText : originalText;
     const success = speech.phase === 'completed' && !!text.trim() && (!clean.enabled || clean.phase === 'completed');
-    void savedHistory.remember({ id: audio.sessionId, text, originalText, language: speech.result?.language ?? speech.language, cleanupEnabled: clean.enabled, status: success ? 'completed' : 'failed', ...(success ? {} : { error: speech.phase === 'completed' && !originalText.trim() ? 'No speech detected.' : speech.phase === 'cancelled' || clean.phase === 'cancelled' ? 'Processing cancelled. You can retry this recording.' : 'No transcript was prepared. Retry this recording from history.' }) });
+    void savedHistory.remember({ id: audio.sessionId, text, originalText, language: speech.result?.language ?? speech.language, cleanupEnabled: clean.enabled, status: success ? 'completed' : 'failed', ...(success ? {} : { error: speech.phase === 'completed' && !originalText.trim() ? 'No speech detected.' : speech.phase === 'cancelled' || clean.phase === 'cancelled' ? 'Processing cancelled. You can retry this recording.' : clean.phase === 'failed' ? clean.message : 'No transcript was prepared. Retry this recording from history.' }) });
   };
   const maybeDeliver = () => {
     const audio = recording.getState(); const speech = transcription.getState(); const clean = cleanup.getState();
@@ -156,16 +173,28 @@ export function initializeRecording() {
     }
     void window.sargosh?.reportTranscription(status).catch(() => {});
   };
-  delivery.subscribe(reportCloud);
-  cleanup.subscribe(() => { remember(); maybeDeliver(); reportCloud(); });
+  const finishTiming = () => {
+    const audio = recording.getState(), speech = transcription.getState(), clean = cleanup.getState(), insertion = delivery.getState();
+    const id = audio.sessionId; if (!id || audio.phase !== 'ready') return;
+    if (insertion.sessionId === id && ['completed', 'failed', 'cancelled'].includes(insertion.phase)) {
+      finishDictationTiming(id, insertion.phase === 'completed' ? 'ok' : insertion.phase === 'cancelled' ? 'cancelled' : 'failed');
+    } else if (speech.sessionId === id && ['failed', 'cancelled'].includes(speech.phase)) finishDictationTiming(id, speech.phase === 'cancelled' ? 'cancelled' : 'failed');
+    else if (clean.sessionId === id && ['failed', 'cancelled'].includes(clean.phase)) finishDictationTiming(id, clean.phase === 'cancelled' ? 'cancelled' : 'failed');
+    else if (speech.sessionId === id && speech.phase === 'completed' && !speech.result?.text) finishDictationTiming(id, 'skipped');
+    else if (speech.sessionId === id && speech.phase === 'completed' && (clean.phase === 'completed' || !clean.enabled) &&
+      (tutorialMode || audio.mode === 'manual' || !window.sargosh?.deliverText)) finishDictationTiming(id, 'skipped');
+  };
+  delivery.subscribe(() => { reportCloud(); finishTiming(); });
+  cleanup.subscribe(() => { remember(); maybeDeliver(); reportCloud(); finishTiming(); });
   transcription.subscribe(() => {
     const speech = transcription.getState();
     if (speech.phase !== 'completed') { cleanupSource = null; cleanup.clear(); }
     if (speech.phase === 'completed' && speech.result && speech.result !== cleanupSource) {
       cleanupSource = speech.result;
-      if (cleanup.getState().enabled) void cleanupTranscript();
+      if (speech.result.cleanup) cleanup.accept(speech.sessionId!, speech.result.cleanup);
+      else if (cleanup.getState().enabled) void cleanupTranscript();
     }
-    remember(); maybeDeliver(); reportCloud();
+    remember(); maybeDeliver(); reportCloud(); finishTiming();
   });
   if (window.sargosh) {
     const update = (state: WindowsState) => {
@@ -189,12 +218,12 @@ export function initializeRecording() {
     void window.sargosh.reportTranscription({ phase: 'idle', message: '' }).catch(() => {});
   }
   window.addEventListener('pagehide', () => {
-    recording.clear();
+    streaming.cancel();recording.clear();
     if (native?.purpose === 'recording' && native.enabled) void window.sargosh?.windowsAction('disarm').catch(() => {});
   }, { once: true });
 }
 if (import.meta.hot) import.meta.hot.dispose(() => {
-  recording.clear();
+  streaming.cancel();recording.clear();
   if (native?.purpose === 'recording' && native.enabled) void window.sargosh?.windowsAction('disarm').catch(() => {});
   // Rebuild the owner and its subscriptions together during development.
   window.location.reload();

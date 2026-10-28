@@ -1,0 +1,28 @@
+/* Dock layout only; recording actions remain owned by the existing overlay. */
+.overlay-stage[data-dock]{position:relative;height:100vh;overflow:visible}
+.overlay-stage[data-dock] .overlay-pill{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);width:38px;height:38px;border-radius:50%;transition:width .18s ease,height .18s ease,border-radius .18s ease;box-shadow:0 4px 18px #0002}
+.overlay-stage[data-dock] .idle-line{width:6px;height:6px;border-radius:50%}
+.overlay-stage[data-dock] .overlay-pill.expanded{width:88px;height:38px;border-radius:22px}
+.overlay-stage[data-dock] .overlay-pill.recording-active,.overlay-stage[data-dock] .overlay-pill.input-test-active{width:140px;height:38px}
+.overlay-stage[data-dock] .overlay-notice-wrap{position:absolute;bottom:72px;left:12px;width:calc(100% - 24px);max-width:396px}
+.overlay-stage[data-dock=left] .overlay-pill,.overlay-stage[data-dock=right] .overlay-pill{left:6px;bottom:auto;top:50%;transform:translateY(-50%);flex-direction:column}
+.overlay-stage[data-dock=right] .overlay-pill{left:auto;right:6px}
+.overlay-stage[data-dock=left] .overlay-pill.expanded,.overlay-stage[data-dock=right] .overlay-pill.expanded{width:38px;height:78px}
+.overlay-stage[data-dock=left] .overlay-pill.recording-active,.overlay-stage[data-dock=right] .overlay-pill.recording-active,.overlay-stage[data-dock=left] .overlay-pill.input-test-active,.overlay-stage[data-dock=right] .overlay-pill.input-test-active{width:38px;height:152px}
+.overlay-stage[data-dock=left] .overlay-notice-wrap{left:64px;right:8px;top:50%;bottom:auto;width:calc(100% - 80px);transform:translateY(-50%)}
+.overlay-stage[data-dock=right] .overlay-notice-wrap{left:auto;right:64px;top:50%;bottom:auto;width:calc(100% - 80px);transform:translateY(-50%)}
+.overlay-stage[data-dock=left] .overlay-tooltip{left:56px;bottom:auto;top:50%;transform:translateY(-50%);max-width:360px;white-space:normal;width:max-content}
+.overlay-stage[data-dock=right] .overlay-tooltip{right:56px;bottom:auto;top:50%;transform:translateY(-50%);max-width:360px;white-space:normal;width:max-content}
+.overlay-stage:not([data-dock=bottom]) .overlay-wave{transform:rotate(90deg);margin:23px -23px;flex-shrink:0}
+.overlay-stage:not([data-dock=bottom]) .overlay-preparing{flex-direction:column;gap:12px}
+.overlay-stage:not([data-dock=bottom]) .overlay-recording-status,.overlay-stage:not([data-dock=bottom]) .overlay-test-label{writing-mode:vertical-rl;font-size:10px}
+.overlay-stage[data-dragging=true] .overlay-tooltip{display:none}
+.overlay-stage[data-dragging=true] .overlay-grip{cursor:grabbing}
+:root[data-surface=overlay] .custom-tooltip{width:max-content;max-width:min(280px,calc(100vw - 72px));white-space:normal}
+.overlay-stage[data-dock]{--notice-exit-x:0px;--notice-exit-y:16px}
+.overlay-stage[data-dock=left]{--notice-exit-x:-20px;--notice-exit-y:0px}
+.overlay-stage[data-dock=right]{--notice-exit-x:20px;--notice-exit-y:0px}
+.overlay-notice[data-closing=true]{animation:overlay-notice-exit .18s ease-in forwards;pointer-events:none}
+@keyframes overlay-notice-exit{from{opacity:1;transform:translate(0,0)}to{opacity:0;transform:translate(var(--notice-exit-x,0px),var(--notice-exit-y,16px))}}
+@media(prefers-reduced-motion:reduce){.overlay-notice[data-closing=true]{animation:none}}
+@media(prefers-reduced-motion:reduce){.overlay-stage[data-dock] .overlay-pill{transition:none}}

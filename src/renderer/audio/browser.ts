@@ -2,10 +2,13 @@ import { MAX_AUDIO_BYTES } from '../../shared/recording';
 import type { AudioBackend, AudioCapture } from './controller';
 
 export class BrowserAudioBackend implements AudioBackend {
-  async open(deviceId: string, onLevel: (level: number) => void, onFailure: (message: string) => void, signal: AbortSignal): Promise<AudioCapture> {
+  async open(deviceId: string, onLevel: (level: number) => void, onFailure: (message: string) => void, signal: AbortSignal, onAudio?: (audio:ArrayBuffer)=>void): Promise<AudioCapture> {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: deviceId === 'default' ? true : { deviceId: { exact: deviceId } }, video: false });
     if (signal.aborted) { stream.getTracks().forEach(track => track.stop()); throw new Error('Cancelled'); }
     let context: AudioContext | undefined;
+    let pcm: AudioWorkletNode | undefined;
+    let finishPCM: (()=>void) | undefined;
+    let pcmStopped: Promise<void> | undefined;
     let recorder: MediaRecorder | undefined;
     let meter: ReturnType<typeof setInterval> | undefined;
     let closed = false;
@@ -19,6 +22,7 @@ export class BrowserAudioBackend implements AudioBackend {
       closed = true; clearInterval(meter);
       signal.removeEventListener('abort', abort);
       for (const track of stream.getTracks()) track.stop();
+      pcm?.disconnect();
       void context?.close().catch(() => {});
       chunks.length = 0;
     };
@@ -59,6 +63,13 @@ export class BrowserAudioBackend implements AudioBackend {
       context = new AudioContext();
       const source = context.createMediaStreamSource(stream);
       const analyser = context.createAnalyser(); analyser.fftSize = 256; source.connect(analyser);
+      if(onAudio){
+        await context.audioWorklet.addModule(new URL('./pcm-worklet.js?no-inline',import.meta.url).href);
+        pcm=new AudioWorkletNode(context,'sargosh-pcm');
+        const silent=context.createGain();silent.gain.value=0;source.connect(pcm);pcm.connect(silent);silent.connect(context.destination);
+        pcm.port.onmessage=event=>{if(closed)return;if(event.data?.audio instanceof ArrayBuffer)onAudio(event.data.audio);if(event.data?.finished)finishPCM?.();};
+        pcm.onprocessorerror=()=>fail('The live audio feed failed. Start a new recording.');
+      }
       await context.resume();
       if (closed || stream.getAudioTracks().some(track => track.readyState === 'ended')) throw new Error('Microphone disconnected');
       const samples = new Uint8Array(analyser.fftSize);
@@ -68,7 +79,7 @@ export class BrowserAudioBackend implements AudioBackend {
         const rms = Math.sqrt(samples.reduce((sum, sample) => sum + ((sample - 128) / 128) ** 2, 0) / samples.length);
         onLevel(Math.min(100, Math.round(rms * 400)));
       }, 100);
-      recorder.start(250);
+      recorder.start(250);pcm?.port.postMessage('start');
       return {
         finish: () => {
           if (finishPromise) return finishPromise;
@@ -76,7 +87,11 @@ export class BrowserAudioBackend implements AudioBackend {
           finishing = true;
           finishPromise = new Promise<Blob>((resolve, reject) => { resolveFinish = resolve; rejectFinish = reject; });
           // The stop event follows the final dataavailable event. Never build the Blob here.
-          recorder.stop();
+          if(pcm){
+            pcmStopped=new Promise<void>((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('Final live audio timed out')),1500);finishPCM=()=>{clearTimeout(timeout);resolve();};});
+            pcm.port.postMessage('finish');
+            void pcmStopped.then(()=>recorder?.stop(),()=>fail('The final live audio could not be collected.'));
+          }else recorder.stop();
           return finishPromise;
         },
         cancel: () => {

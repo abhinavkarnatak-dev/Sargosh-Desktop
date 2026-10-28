@@ -1,4 +1,4 @@
-import { useModalDialog } from './modal';
+import { useModalDialog, useModalDismiss } from './modal';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Copy, Download, LoaderCircle, Mic, MoreHorizontal, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import type { HistoryEntry } from '../shared/types';
@@ -120,7 +120,8 @@ export function HistoryList({ onNotice }: { onNotice(message: string): void }) {
     {deleting && <DeleteDialog busy={deletingBusy} onClose={() => { if (!deletingBusy) setDeleting(null); }} onConfirm={() => void remove()} />}
   </section>;
 }
-function DeleteDialog({ busy, onClose, onConfirm }: { busy: boolean; onClose(): void; onConfirm(): void }) {
+function DeleteDialog({ busy, onClose: onDismissed, onConfirm }: { busy: boolean; onClose(): void; onConfirm(): void }) {
+  const {closing,dismiss:onClose}=useModalDismiss(onDismissed);
   const dialog = useRef<HTMLDialogElement>(null);
   const outsidePress = useRef(false);
   function outside(element: HTMLDialogElement, x: number, y: number) {
@@ -128,15 +129,15 @@ function DeleteDialog({ busy, onClose, onConfirm }: { busy: boolean; onClose(): 
     return x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom;
   }
   useModalDialog(dialog);
-  return <dialog className="history-delete-dialog" ref={dialog} aria-labelledby="delete-title" onCancel={event => { event.preventDefault(); onClose(); }} onPointerDown={event => {
+  return <dialog className="history-delete-dialog animated-modal" data-closing={closing} ref={dialog} aria-labelledby="delete-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }} onPointerDown={event => {
     outsidePress.current = event.target === event.currentTarget && outside(event.currentTarget, event.clientX, event.clientY);
   }} onClick={event => {
     const dismiss = outsidePress.current && event.target === event.currentTarget && outside(event.currentTarget, event.clientX, event.clientY);
     outsidePress.current = false;
     if (dismiss && !busy) onClose();
   }}>
-    <button className="icon-button history-delete-close" aria-label="Close delete confirmation" disabled={busy} onClick={onClose}><X size={18} /></button>
+    <button className="icon-button history-delete-close" aria-label="Close delete confirmation" disabled={busy || closing} onClick={onClose}><X size={18} /></button>
     <h2 id="delete-title">Delete this dictation?</h2><p>This deletes the transcript and original audio from this computer. Your accumulated usage totals stay unchanged.</p>
-    <div className="dialog-actions"><button className="button secondary" disabled={busy} onClick={onClose}>Keep dictation</button><button className="button danger" disabled={busy} onClick={onConfirm}>{busy ? 'Deleting...' : 'Delete transcript'}</button></div>
+    <div className="dialog-actions"><button className="button secondary" disabled={busy || closing} onClick={onClose}>Keep dictation</button><button className="button danger" disabled={busy || closing} onClick={onConfirm}>{busy ? 'Deleting...' : 'Delete transcript'}</button></div>
   </dialog>;
 }
