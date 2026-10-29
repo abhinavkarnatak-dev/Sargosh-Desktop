@@ -21,11 +21,11 @@ export class StoreUpdates {
   private set(update:Partial<StoreUpdateState>){if(this.disposed)return;this.state={...this.state,...update};this.lastBlocked=this.busy();this.changed(this.snapshot());}
   start(){
     if(!this.enabled||this.interval||this.disposed)return;
-    this.initial=setTimeout(()=>void this.action('check'),30000);
-    this.interval=setInterval(()=>void this.action('check'),15*60*1000);
+    this.initial=setTimeout(()=>void this.action('check',false),30000);
+    this.interval=setInterval(()=>void this.action('check',false),15*60*1000);
     this.initial.unref?.();this.interval.unref?.();
   }
-  async action(action:StoreUpdateAction):Promise<StoreUpdateState>{
+  async action(action:StoreUpdateAction,userInitiated=true):Promise<StoreUpdateState>{
     if(!this.enabled||this.disposed)return this.snapshot();
     if(action==='later'){this.set({prompt:false});return this.snapshot();}
     if(this.operation)return this.snapshot();
@@ -52,7 +52,7 @@ export class StoreUpdates {
         if(result.code==='UNSUPPORTED'){this.enabled=false;this.set({...NO_STORE_UPDATES});return this.snapshot();}
         if(result.code==='NOT_DOWNLOADED'){this.set({phase:'available',progress:0,message:'Download the update again before installing.'});return this.snapshot();}
         this.set({phase:action==='install'?'ready':previous==='available'||action==='download'?'available':'error',
-          message:result.code==='CANCELLED'?'Update postponed. You can continue from the sidebar.':'Windows could not complete the update. Please try again.'});
+          message:result.code==='CANCELLED'?'Update postponed. You can continue from the sidebar.':action==='check'?'Could not check for updates. Please try again.':'Windows could not complete the update. Please try again.'});
         return this.snapshot();
       }
       if(action==='install'){
@@ -61,7 +61,7 @@ export class StoreUpdates {
       }else if(result.downloaded){if(!this.aumid)throw new Error('Store package identity unavailable.');this.set({phase:'ready',progress:1});}
       else if(result.available){
         const prompt=!this.notified;this.notified=true;this.set({phase:'available',prompt});
-      }else this.set({phase:'idle',progress:0,message:action==='download'?'Sargosh is already up to date.':''});
+      }else this.set({phase:'idle',progress:0,message:action==='download'||userInitiated?'Sargosh is already up to date.':''});
     }catch{
       this.set({phase:action==='install'?'ready':action==='download'?'available':'error',message:this.busy()?'Finish the current dictation before updating.':'The Store update service is unavailable. Please try again.'});
     }finally{

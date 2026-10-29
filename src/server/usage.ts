@@ -11,6 +11,7 @@ export interface UsageStore {
  reserveStream?(userId:string,requestId:string,kind:'stt',fingerprint:string,seconds:number,costMicro:number):Promise<UsageLease>;
  finishStream?(lease:UsageLease,seconds:number,costMicro:number):Promise<void>;
  reservePractice?(userId:string,requestId:string,kind:'stt'|'cleanup',fingerprint:string,seconds:number,costMicro:number):Promise<UsageLease>;
+ reservePracticeStream?(userId:string,requestId:string,kind:'stt',fingerprint:string,seconds:number,costMicro:number):Promise<UsageLease>;
  snapshot(userId:string):Promise<AccountUsage>;
 }
 const messages:Record<string,string>={
@@ -37,6 +38,7 @@ export class SupabaseUsageStore implements UsageStore {
  async reserveStream(userId:string,requestId:string,kind:'stt',fingerprint:string,seconds:number,costMicro:number){return this.reserveWith('reserve_stream_usage',userId,requestId,kind,fingerprint,seconds,costMicro);}
  async finishStream(x:UsageLease,seconds:number,costMicro:number){if(await this.rpc('finish_stream_usage',{...this.args(x),p_seconds:seconds,p_cost_micro:costMicro})!==true)throw new UsageError('USAGE_UNAVAILABLE','Live audio usage could not be confirmed. Do not resend automatically.',503);}
  async reservePractice(userId:string,requestId:string,kind:'stt'|'cleanup',fingerprint:string,seconds:number,costMicro:number){return this.reserveWith('reserve_practice_usage',userId,requestId,kind,fingerprint,seconds,costMicro);}
+ async reservePracticeStream(userId:string,requestId:string,kind:'stt',fingerprint:string,seconds:number,costMicro:number){return this.reserveWith('reserve_practice_stream_usage',userId,requestId,kind,fingerprint,seconds,costMicro);}
  private async reserveWith(rpc:string,userId:string,requestId:string,kind:'stt'|'cleanup',fingerprint:string,seconds:number,costMicro:number){
   const result=await this.rpc(rpc,{p_user_id:userId,p_request_id:requestId,p_kind:kind,p_fingerprint:fingerprint,p_seconds:seconds,p_cost_micro:costMicro});
   if(result?.code!=='OK'||typeof result.leaseId!=='string'){

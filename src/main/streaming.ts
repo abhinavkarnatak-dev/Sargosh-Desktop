@@ -7,7 +7,7 @@ import { TimingTrace, type TimingMeta } from '../shared/timing';
 
 export function validStreamResult(value: unknown, request: StreamRequest): value is Transcript {
   const x=value as Transcript|null;
-  if(!x||typeof x.text!=='string'||x.text.length>100000||x.language!==request.language||x.model!=='nova-3'||!Number.isFinite(x.durationMs)||x.durationMs<0||x.durationMs>300000||(x.confidence!==null&&(!Number.isFinite(x.confidence)||x.confidence<0||x.confidence>1)))return false;
+  if(!x||typeof x.text!=='string'||x.text.length>100000||x.language!==request.language||x.model!=='nova-3'||!Number.isFinite(x.durationMs)||x.durationMs<0||x.durationMs>(request.practice?20000:300000)||(x.confidence!==null&&(!Number.isFinite(x.confidence)||x.confidence<0||x.confidence>1)))return false;
   if(request.cleanup&&x.text.trim()){
     const c=x.cleanup;
     if(!c||typeof c.ok!=='boolean')return false;
@@ -27,6 +27,7 @@ export class DesktopStreamer {
   get busy(){return !!this.active;}
   async start(request:StreamRequest):Promise<Start>{
     if(this.active)return {ok:false,code:'BUSY',message:'A live dictation is already running.'};
+    if(request.practice&&!hostedEndpoint(this.base))return {ok:false,code:'STREAM_UNSUPPORTED',message:'Practice requires the hosted service.'};
     let complete!:(r:StreamResult)=>void;
     const result=new Promise<StreamResult>(resolve=>{complete=resolve;});
     let readyResolve!:(r:Start)=>void;
@@ -53,7 +54,7 @@ export class DesktopStreamer {
         headers['x-sargosh-token']=value.token;
       }
       if(active.abort.signal.aborted)return await ready;
-      const url=new URL(this.base+'/v1/stream');url.protocol=url.protocol==='https:'?'wss:':'ws:';
+      const url=new URL(this.base+(request.practice?'/v1/practice/stream':'/v1/stream'));url.protocol=url.protocol==='https:'?'wss:':'ws:';
       url.searchParams.set('id',request.requestId);url.searchParams.set('language',request.language);url.searchParams.set('cleanup',request.cleanup?'1':'0');
       const socket=this.connect(url,{headers,handshakeTimeout:10000,maxPayload:1024*1024,followRedirects:false,perMessageDeflate:false});active.socket=socket;
       socket.on('unexpected-response',(_req,response)=>{
@@ -70,7 +71,7 @@ export class DesktopStreamer {
         if(settled||active.abort.signal.aborted)return;
         try{
           const message=JSON.parse(raw.toString());
-          if(message.type==='ready'&&Number.isInteger(message.maxAudioSeconds)&&message.maxAudioSeconds>=1&&message.maxAudioSeconds<=300){active.maxBytes=message.maxAudioSeconds*STREAM_BYTES_PER_SECOND;readyResolve({ok:true,maxAudioSeconds:message.maxAudioSeconds});return;}
+          if(message.type==='ready'&&Number.isInteger(message.maxAudioSeconds)&&message.maxAudioSeconds>=1&&message.maxAudioSeconds<=(request.practice?20:300)){active.maxBytes=message.maxAudioSeconds*STREAM_BYTES_PER_SECOND;readyResolve({ok:true,maxAudioSeconds:message.maxAudioSeconds});return;}
           if(message.type==='error'&&typeof message.code==='string'&&message.code.length<=100&&typeof message.message==='string'&&message.message.length<=400){fail(message.code,message.message);return;}
           if(message.type==='result'&&active.finishing&&validStreamResult(message.result,request)){settled=true;complete({ok:true,result:message.result});socket.close(1000);return;}
           fail('STREAM_PROTOCOL','The service returned an invalid live response.');

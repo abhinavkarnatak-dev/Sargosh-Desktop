@@ -27,8 +27,10 @@ export function installStreaming(server: FastifyInstance, options: StreamOptions
       const body=JSON.stringify({code,message});socket.end(`HTTP/1.1 ${status} Rejected\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
     };
     let url: URL; try { url=new URL(request.url??'', 'http://localhost'); } catch { reject(400,'INVALID_REQUEST','Invalid live request.');return; }
-    if(url.pathname!=='/v1/stream'){reject(404,'STREAM_UNSUPPORTED','Live dictation is not available on this backend.');return;}
+    const practice=url.pathname==='/v1/practice/stream';
+    if(url.pathname!=='/v1/stream'&&!practice){reject(404,'STREAM_UNSUPPORTED','Live dictation is not available on this backend.');return;}
     if(!options.enabled || !options.apiKey || (options.store && (!options.store.reserveStream || !options.store.finishStream))){reject(501,'STREAM_UNSUPPORTED','Live dictation is not enabled on this backend.');return;}
+    if(practice&&(!options.store?.reservePracticeStream||!options.store.reservePractice)){reject(501,'STREAM_UNSUPPORTED','Live practice is not enabled on this backend.');return;}
     if(pending>=2){reject(429,'BUSY','The service is processing other recordings.');return;}
     const id=url.searchParams.get('id'),language=url.searchParams.get('language'),clean=url.searchParams.get('cleanup');
     if(!isRequestId(id)||!isSpeechLanguage(language)||!['0','1'].includes(clean??'')||[...url.searchParams.keys()].some(x=>!['id','language','cleanup'].includes(x))){reject(400,'INVALID_REQUEST','Invalid live request.');return;}
@@ -61,7 +63,7 @@ export function installStreaming(server: FastifyInstance, options: StreamOptions
           socket.removeListener('close',closed);socket.removeListener('error',errored);
           handshake.end('ok',{statusCode:101});
           clearTimeout(deadline);
-          void serveStream(ws,account,id,language,clean==='1',options).catch(()=>{ws.terminate();}).finally(release);
+          void serveStream(ws,account,id,language,clean==='1',options,practice).catch(()=>{ws.terminate();}).finally(release);
         });
         // With no verifyClient hook, ws invokes this callback synchronously on acceptance.
         // Invalid handshakes instead return normally: they must not retain the account lock.
@@ -78,16 +80,16 @@ export function installStreaming(server: FastifyInstance, options: StreamOptions
   server.server.on('upgrade',upgrade);
   server.addHook('preClose',async()=>{server.server.removeListener('upgrade',upgrade);for(const socket of handshakes)socket.destroy();for(const client of sockets.clients)client.terminate();});
 }
-export async function serveStream(ws:WebSocket,owner:string,id:string,language:import('../shared/transcription').SpeechLanguage,combined:boolean,options:StreamOptions) {
+export async function serveStream(ws:WebSocket,owner:string,id:string,language:import('../shared/transcription').SpeechLanguage,combined:boolean,options:StreamOptions,practice=false) {
     const cleanup=createCleanupProvider(options);
     const trace=new TimingTrace(id,'server',id,options.timingSink);
     const abort=new AbortController();const store=options.store;
-    let live:LiveRecognizer|undefined,lease:UsageLease|undefined,dispatched=false,bytes=0,limit=300,finished=false,ready=false;
+    let live:LiveRecognizer|undefined,lease:UsageLease|undefined,dispatched=false,bytes=0,limit=practice?20:300,finished=false,ready=false;
     let queue=Promise.resolve();let queuedBytes=0,queuedFrames=0;
     const cost=(seconds:number)=>Math.ceil(seconds*(options.rate??9200)/60);
-    const fingerprint=createHash('sha256').update('stream:linear16:16000:mono:'+language).digest('hex');
+    const fingerprint=createHash('sha256').update((practice?'practice:':'')+'stream:linear16:16000:mono:'+language).digest('hex');
     const send=(value:object)=>{if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(value));};
-    const timer=setTimeout(()=>{send({type:'error',code:'STREAM_TIMEOUT',message:'The live recording reached its time limit. Retry the saved recording.'});abort.abort();ws.close();},310000);
+    const timer=setTimeout(()=>{send({type:'error',code:'STREAM_TIMEOUT',message:'The live recording reached its time limit. Retry the saved recording.'});abort.abort();ws.close();},practice?90000:310000);
     const close=()=>{abort.abort();};ws.on('close',close);ws.on('error',close);
     let rejectEnd!:(e:Error)=>void,resolveEnd!:()=>void;
     const end=new Promise<void>((yes,no)=>{resolveEnd=yes;rejectEnd=no;});void end.catch(()=>{});
@@ -123,9 +125,9 @@ export async function serveStream(ws:WebSocket,owner:string,id:string,language:i
           let cleanLease:UsageLease|undefined,cleanDispatched=false;
           try {
             const text=transcript.text,model=cleanup.model;
-            if(text.length>MAX_CLEANUP_CHARS)throw new CleanupError('CLEANUP_INPUT','The transcript exceeds the cleanup limit.',400);
-            const fp=createHash('sha256').update(CLEANUP_PROMPT_VERSION+cleanup.fingerprint+language+text).digest('hex');
-            if(store)cleanLease=await trace.measure('server.reserve',()=>store.reserve(owner,id,'cleanup',fp,0,cleanupReservationCost(text,language,model)));
+            if(text.length>(practice?3000:MAX_CLEANUP_CHARS))throw new CleanupError('CLEANUP_INPUT','The transcript exceeds the cleanup limit.',400);
+            const fp=createHash('sha256').update((practice?'practice:':'')+CLEANUP_PROMPT_VERSION+cleanup.fingerprint+language+text).digest('hex');
+            if(store)cleanLease=await trace.measure('server.reserve',()=>practice?store.reservePractice!(owner,id,'cleanup',fp,0,cleanupReservationCost(text,language,model)):store.reserve(owner,id,'cleanup',fp,0,cleanupReservationCost(text,language,model)));
             if(abort.signal.aborted)throw new CleanupError('CANCELLED','Dictation cancelled.',499);
             if(cleanLease){await trace.measure('server.dispatch',()=>store!.dispatch(cleanLease!));cleanDispatched=true;}
             let actual:number|undefined;
@@ -150,12 +152,18 @@ export async function serveStream(ws:WebSocket,owner:string,id:string,language:i
       if(store){
         const usage=await trace.measure('server.eligibility',()=>store.snapshot(owner));
         if(!usage.enabled)throw new UsageError('AUTH_REQUIRED','Verify your email before using live dictation.',403);
-        const day=Math.floor(usage.dailyLimitSeconds-usage.dailyUsedSeconds),month=Math.floor(usage.monthlyLimitSeconds-usage.monthlyUsedSeconds);
-        if(day<1)throw new UsageError('DAILY_LIMIT','You have reached your daily allowance.');
-        if(month<1)throw new UsageError('MONTHLY_LIMIT','You have reached your monthly allowance.');
-        limit=Math.min(300,day,month);
-        lease=await trace.measure('server.reserve',()=>store.reserveStream!(owner,id,'stt',fingerprint,limit,cost(limit)));
+        if(practice){
+          if(!store.reservePracticeStream||!store.reservePractice||!store.finishStream)throw new UsageError('PRACTICE_UNAVAILABLE','Live practice is not available yet.',503);
+          lease=await trace.measure('server.reserve',()=>store.reservePracticeStream!(owner,id,'stt',fingerprint,limit,cost(limit)));
+        }else{
+          const day=Math.floor(usage.dailyLimitSeconds-usage.dailyUsedSeconds),month=Math.floor(usage.monthlyLimitSeconds-usage.monthlyUsedSeconds);
+          if(day<1)throw new UsageError('DAILY_LIMIT','You have reached your daily allowance.');
+          if(month<1)throw new UsageError('MONTHLY_LIMIT','You have reached your monthly allowance.');
+          limit=Math.min(300,day,month);
+          lease=await trace.measure('server.reserve',()=>store.reserveStream!(owner,id,'stt',fingerprint,limit,cost(limit)));
+        }
       }
+      else if(practice)throw new UsageError('PRACTICE_UNAVAILABLE','Practice requires usage accounting.',503);
       if(abort.signal.aborted)throw new SpeechError('CANCELLED','Dictation cancelled.',499);
       live=(options.openRecognizer??openDeepgramStream)(options.apiKey!,language,abort.signal);
       await trace.measure('stream.connect',()=>live!.ready,{},abort.signal);

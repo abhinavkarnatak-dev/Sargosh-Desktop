@@ -292,7 +292,7 @@ if (ownsLock) {
     handle('sargosh:recording-status', () => recordingState);
     ipcMain.handle('sargosh:stream-start',(event,request:StreamRequest)=>{
       checkSender(event);
-      if(event.sender!==mainWindow?.webContents||!request||!isRequestId(request.requestId)||request.traceId!==request.requestId||!isSpeechLanguage(request.language)||typeof request.cleanup!=='boolean')throw new Error('Invalid live dictation request.');
+      if(event.sender!==mainWindow?.webContents||!request||!isRequestId(request.requestId)||request.traceId!==request.requestId||!isSpeechLanguage(request.language)||typeof request.cleanup!=='boolean'||(request.practice!==undefined&&typeof request.practice!=='boolean'))throw new Error('Invalid live dictation request.');
       if(storeUpdates?.installing||historyRetry||transcriber.busy)return {ok:false,code:'BUSY',message:'Finish the current request first.'};
       return streamer.start(request);
     });

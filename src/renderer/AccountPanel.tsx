@@ -32,7 +32,7 @@ function DeleteAccountDialog({ email, busy, message, onClose: onDismissed, onCon
   }}>
     <h2 id="account-delete-title">Delete your account?</h2>
     <p id="account-delete-description">This permanently deletes {email} from Sargosh, including your profile, local history, recordings, and preferences on this computer. It cannot be undone.</p>
-    <p>Usage and spending records are retained without your name or email. Files exported outside Sargosh and local data on other computers are not removed.</p>
+    <p>Limited usage and spending records are retained. A protected email identifier and used minutes are kept until the current monthly allowance resets, then removed within an hour, to prevent allowance resets through account recreation. Your name and readable email are not kept in these records. Files exported outside Sargosh and local data on other computers are not removed.</p>
     <label className="account-delete-confirm">Type DELETE to confirm<input value={confirmation} disabled={busy} autoComplete="off" spellCheck={false} onChange={event => setConfirmation(event.target.value)} /></label>
     {message && <p role="alert">{message}</p>}
     <div className="dialog-actions"><button className="button secondary" disabled={busy || closing} onClick={onClose}>Keep account</button><button className="button danger" disabled={closing || busy || confirmation !== 'DELETE'} onClick={onConfirm}>{busy ? 'Deleting account...' : 'Delete account permanently'}</button></div>

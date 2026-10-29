@@ -9,6 +9,7 @@ import { STREAM_BYTES_PER_SECOND as rate } from '../src/shared/streaming';
 import type { DesktopBridge } from '../src/shared/types';
 import type { Transcript } from '../src/shared/transcription';
 import { setTimingSink } from '../src/shared/timing';
+import { UsageError } from '../src/server/usage';
 
 const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
 const deferred=<T>()=>{let resolve!:(x:T)=>void,reject!:(e:Error)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
@@ -49,19 +50,47 @@ describe('Deepgram live transcript ownership',()=>{
   });
 });
 
-function service(){
+function service(practice=false,practiceFailure?:UsageError){
   const socket=new Socket();const received:Buffer[]=[];const finalResult=deferred<Transcript>();
   const live={ready:Promise.resolve(),send:vi.fn((data:Buffer)=>received.push(data)),finish:vi.fn(()=>finalResult.promise),cancel:vi.fn()};
   const lease={userId:'owner',requestId:'stream',kind:'stt' as const,leaseId:'lease'};
-  const store={snapshot:vi.fn(async()=>({enabled:true,dailyLimitSeconds:600,monthlyLimitSeconds:6000,dailyUsedSeconds:0,monthlyUsedSeconds:0,dailyResetAt:'',monthlyResetAt:''})),reserveStream:vi.fn(async()=>lease),reserve:vi.fn(async()=>({...lease,kind:'cleanup' as const})),dispatch:vi.fn(async()=>{}),finish:vi.fn(async()=>{}),release:vi.fn(async()=>{}),finishStream:vi.fn(async()=>{})};
+  const store={snapshot:vi.fn(async()=>({enabled:true,dailyLimitSeconds:600,monthlyLimitSeconds:6000,dailyUsedSeconds:practice?600:0,monthlyUsedSeconds:practice?6000:0,dailyResetAt:'',monthlyResetAt:''})),reserveStream:vi.fn(async()=>lease),reservePracticeStream:vi.fn(async()=>lease),reservePractice:vi.fn(async()=>({...lease,kind:'cleanup' as const})),reserve:vi.fn(async()=>({...lease,kind:'cleanup' as const})),dispatch:vi.fn(async()=>{}),finish:vi.fn(async()=>{}),release:vi.fn(async()=>{}),finishStream:vi.fn(async()=>{})};
   const clean=vi.fn(async()=>Response.json({id:'fixture',model:'gpt-6-luna',status:'completed',service_tier:'fast',output:[{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'{"text":"A final sentence."}'}]}],usage:{input_tokens:50,output_tokens:10}}));
   const options:StreamOptions={enabled:true,apiKey:'fixture',store,cleanupProvider:'openai',openaiApiKey:'fixture',openaiFetcher:clean,authorize:async()=> 'owner',openRecognizer:()=>live};
-  const done=serveStream(socket as unknown as WebSocket,'owner','stream','en',true,options);
+  if(practiceFailure)store.reservePracticeStream.mockRejectedValue(practiceFailure);
+  const done=serveStream(socket as unknown as WebSocket,'owner','stream','en',true,options,practice);
   const audio=(bytes=rate)=>socket.emit('message',Buffer.alloc(bytes),true);
   const finish=()=>socket.emit('message',Buffer.from('{"type":"finish"}'),false);
   return{socket,live,store,done,audio,finish,finalResult,clean,received};
 }
 describe('stream relay and accounting',()=>{
+  it.each(['PRACTICE_LIMIT','PRACTICE_UNAVAILABLE','SERVICE_BUDGET'])('rejects %s before opening the paid practice provider',async(code)=>{
+    const p=service(true,new UsageError(code,'Practice is unavailable.'));await p.done;
+    expect(p.socket.sent).toContainEqual(expect.objectContaining({type:'error',code}));
+    expect(p.live.send).not.toHaveBeenCalled();expect(p.live.finish).not.toHaveBeenCalled();expect(p.clean).not.toHaveBeenCalled();expect(p.store.dispatch).not.toHaveBeenCalled();
+  });
+  it('streams practice with exhausted normal allowance, using only practice reservations and the same cleanup model and rules',async()=>{
+    const p=service(true);await flush();
+    expect(p.socket.sent).toContainEqual({type:'ready',maxAudioSeconds:20});
+    expect(p.store.reservePracticeStream).toHaveBeenCalledWith('owner','stream','stt',expect.any(String),20,3067);
+    p.audio();await flush();p.finish();p.finalResult.resolve(transcript);await p.done;
+    expect(p.store.reserveStream).not.toHaveBeenCalled();expect(p.store.reserve).not.toHaveBeenCalled();
+    expect(p.store.reservePractice).toHaveBeenCalledWith('owner','stream','cleanup',expect.any(String),0,expect.any(Number));
+    expect(p.store.finishStream).toHaveBeenCalledWith(expect.anything(),1,154);expect(p.store.finish).toHaveBeenCalledOnce();
+    expect(p.clean).toHaveBeenCalledOnce();
+    const normal=service();await flush();normal.audio();await flush();normal.finish();normal.finalResult.resolve(transcript);await normal.done;
+    const body=(fetcher:typeof p.clean)=>JSON.parse((fetcher.mock.calls[0] as unknown as [unknown,RequestInit])[1].body as string);
+    expect(body(p.clean)).toEqual(body(normal.clean));
+    expect(body(p.clean)).toMatchObject({model:'gpt-6-luna',service_tier:'fast',reasoning:{effort:'none'}});
+  });
+  it('enforces the practice audio ceiling on the server and settles cancellation without calling cleanup',async()=>{
+    const p=service(true);await flush();
+    for(let i=0;i<20;i++){p.audio();await flush();}
+    p.audio(2);await p.done;
+    expect(p.received).toHaveLength(20);expect(p.clean).not.toHaveBeenCalled();
+    expect(p.store.finishStream).toHaveBeenCalledWith(expect.anything(),20,3067);
+    expect(p.socket.sent).toContainEqual(expect.objectContaining({type:'error',code:'STREAM_LIMIT'}));
+  });
   it('reserves before sending audio, cleans only the complete transcript once, and settles actual audio seconds',async()=>{
     const s=service();await flush();expect(s.store.reserveStream).toHaveBeenCalledWith('owner','stream','stt',expect.any(String),300,46000);
     expect(s.clean).not.toHaveBeenCalled();s.audio();await flush();expect(s.store.dispatch).toHaveBeenCalledTimes(1);expect(s.received).toHaveLength(1);
@@ -83,6 +112,13 @@ describe('stream relay and accounting',()=>{
 
 describe('recording-side streaming',()=>{
   function setup(){const bridge={startStream:vi.fn(async()=>({ok:true,maxAudioSeconds:300})),streamChunk:vi.fn(async(_id:string,_audio:ArrayBuffer)=>true),finishStream:vi.fn(async()=>({ok:true,result:transcript})),cancelStream:vi.fn(async()=>{})};const limit=vi.fn();return{bridge,limit,capture:new StreamingCapture(()=>bridge as unknown as DesktopBridge,limit)};}
+  it('marks tutorial streams as practice and keeps the ordinary request unchanged',async()=>{
+    const {bridge,capture}=setup();bridge.startStream.mockResolvedValue({ok:true,maxAudioSeconds:20});
+    capture.prepare('trial','en',true,true);capture.activate('trial');await capture.finish('trial',new AbortController().signal);
+    expect(bridge.startStream).toHaveBeenLastCalledWith({requestId:'trial',traceId:'trial',language:'en',cleanup:true,practice:true});
+    capture.prepare('normal','en',true);capture.activate('normal');await capture.finish('normal',new AbortController().signal);
+    expect(bridge.startStream).toHaveBeenLastCalledWith({requestId:'normal',traceId:'normal',language:'en',cleanup:true});
+  });
   it('buffers pending shortcut audio, sends all chunks in order, then finishes',async()=>{
     const {bridge,capture}=setup();capture.prepare('id','en',true);const a=new Uint8Array([1,0]).buffer,b=new Uint8Array([2,0]).buffer;capture.push('id',a);expect(bridge.startStream).not.toHaveBeenCalled();capture.activate('id');capture.push('id',b);
     expect(await capture.finish('id',new AbortController().signal)).toEqual(transcript);expect(bridge.streamChunk.mock.calls.map(x=>x[1])).toEqual([a,b]);expect(bridge.finishStream).toHaveBeenCalledOnce();
@@ -107,6 +143,18 @@ it('desktop bridge keeps credentials in headers and never accepts premature resu
   expect(connect.mock.calls[0]?.[1]).toMatchObject({headers:{Authorization:'Bearer private-access-token'}});expect(String(connect.mock.calls[0]?.[0])).not.toContain('private-access-token');
   socket.emit('message',Buffer.from('{"type":"ready","maxAudioSeconds":300}'));expect(await started).toMatchObject({ok:true});client.chunk('id',new ArrayBuffer(2));
   socket.emit('message',Buffer.from(JSON.stringify({type:'result',result:transcript})));expect(await client.finish('id')).toMatchObject({ok:false,code:'STREAM_PROTOCOL'});
+});
+
+it('opens practice only through its hosted endpoint and rejects a server allowance above twenty seconds',async()=>{
+  const connect=vi.fn();const local=new DesktopStreamer(async()=> 'token','http://127.0.0.1:4318',fetch,connect);
+  expect(await local.start({requestId:'practice',traceId:'practice',language:'en',cleanup:true,practice:true})).toMatchObject({ok:false,code:'STREAM_UNSUPPORTED'});
+  expect(connect).not.toHaveBeenCalled();
+  const socket=new Socket();const hostedConnect=vi.fn((_url:URL,_options:WebSocket.ClientOptions)=>socket as unknown as WebSocket);
+  const client=new DesktopStreamer(async()=> 'token','https://api.example.com',fetch,hostedConnect);
+  const started=client.start({requestId:'practice',traceId:'practice',language:'en',cleanup:true,practice:true});await flush();
+  expect(hostedConnect.mock.calls[0][0].pathname).toBe('/v1/practice/stream');
+  socket.emit('message',Buffer.from('{"type":"ready","maxAudioSeconds":300}'));
+  expect(await started).toMatchObject({ok:false,code:'STREAM_PROTOCOL'});client.cancel();
 });
 
 it('records the actual handshake status and network failure without credentials or raw error text',async()=>{

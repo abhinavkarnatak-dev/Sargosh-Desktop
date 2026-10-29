@@ -11,6 +11,24 @@ function setup(enabled=true){
   return {manager,bridge,changed,prepare,restore,restart,setBusy:(value:boolean)=>{busy=value;manager.activityChanged();}};
 }
 afterEach(()=>{vi.useRealTimers();});
+it('confirms a successful manual check with no updates and allows checking again',async()=>{
+  const s=setup();s.bridge.call.mockResolvedValue({ok:true,available:false,downloaded:false,aumid});
+  expect(await s.manager.action('check')).toMatchObject({phase:'idle',prompt:false,message:'Sargosh is already up to date.'});
+  expect(await s.manager.action('check')).toMatchObject({phase:'idle',prompt:false,message:'Sargosh is already up to date.'});
+  expect(s.bridge.call).toHaveBeenCalledTimes(2);expect(s.restart).not.toHaveBeenCalled();s.manager.dispose();
+});
+it('keeps successful background checks quiet when there is no update',async()=>{
+  vi.useFakeTimers();const s=setup();s.bridge.call.mockResolvedValue({ok:true,available:false,downloaded:false,aumid});s.manager.start();
+  await vi.advanceTimersByTimeAsync(30000);expect(s.manager.snapshot()).toMatchObject({phase:'idle',prompt:false,message:''});
+  await vi.advanceTimersByTimeAsync(15*60*1000);expect(s.manager.snapshot()).toMatchObject({phase:'idle',message:''});
+  expect(s.bridge.call).toHaveBeenCalledTimes(2);s.manager.dispose();
+});
+it('does not misreport a failed check as up to date or an installation failure',async()=>{
+  const s=setup();s.bridge.call.mockResolvedValueOnce({ok:false,code:'STORE_ERROR'});
+  expect(await s.manager.action('check')).toMatchObject({phase:'error',prompt:false,message:'Could not check for updates. Please try again.'});
+  s.bridge.call.mockResolvedValueOnce({ok:true,available:false,downloaded:false,aumid});
+  expect(await s.manager.action('check')).toMatchObject({phase:'idle',message:'Sargosh is already up to date.'});s.manager.dispose();
+});
 it('does not touch Windows Store or schedule checks in development and direct installs',async()=>{
   vi.useFakeTimers();const s=setup(false);s.manager.start();await vi.advanceTimersByTimeAsync(60*60*1000);
   expect((await s.manager.action('download')).phase).toBe('unsupported');expect(s.bridge.call).not.toHaveBeenCalled();s.manager.dispose();

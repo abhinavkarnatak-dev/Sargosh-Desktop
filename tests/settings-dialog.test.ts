@@ -62,7 +62,14 @@ it('keeps Escape and the close button working without duplicate dismissal', asyn
 });
 
 it('orders themes System, Dark, Light and shows the release version',async()=>{
- await render();expect(Array.from(host.querySelectorAll('.theme-picker button')).map(button=>button.textContent)).toEqual(['System','Dark','Light']);expect(host.querySelector('.settings-version')?.textContent).toBe('Sargosh 1.0.1');
+ await render();expect(Array.from(host.querySelectorAll('.theme-picker button')).map(button=>button.textContent)).toEqual(['System','Dark','Light']);expect(host.querySelector('.settings-version')?.textContent).toBe('Sargosh 1.0.2');
+});
+it('labels language settings without exposing the transcription provider',async()=>{
+ await render();
+ const view=host.querySelector<HTMLButtonElement>('button[aria-controls="settings-languages"]');
+ expect(view).toBeTruthy();await act(async()=>view!.click());
+ expect(host.querySelector('label[for="settings-speech-language"]')?.textContent).toBe('Speech language');
+ expect(host.textContent).not.toContain('Deepgram');
 });
 
 it('closes immediately when reduced motion is preferred',async()=>{

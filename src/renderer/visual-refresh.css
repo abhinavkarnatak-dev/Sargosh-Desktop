@@ -33,7 +33,6 @@
 .sidebar .nav-item.active:after{content:'';position:absolute;right:12px;width:4px;height:4px;border-radius:50%;background:var(--accent)}
 .collapsed .sidebar .nav-item.active:after{display:none}
 .sidebar-bottom{border:0;padding-top:18px}
-.sidebar-bottom .nav-item{border-top:1px solid var(--border);border-radius:0;padding-top:20px;height:58px}
 .app-frame .main-surface{border-radius:19px;border:1px solid var(--border);background:var(--surface);min-height:0;box-shadow:0 12px 45px #00000006}
 .main-scroll{scroll-padding-top:36px}
 .page-content{max-width:1190px;padding:42px 48px 0}

@@ -390,3 +390,19 @@ it('streams during recording, flushes the final packet, and uses the combined re
  expect(runtime.cleanup.getState()).toMatchObject({phase:'completed',result:{text:'Final cleaned words.'}});
  expect(bridge.deliverText).toHaveBeenCalledWith(expect.objectContaining({text:'Final cleaned words.'}));
 });
+
+it('streams tutorial practice without saving history, changing Insights, or inserting text into another app',async()=>{
+ const start=vi.fn(async()=>({ok:true,maxAudioSeconds:20})),chunk=vi.fn(async()=>true);
+ const finish=vi.fn(async()=>({ok:true,result:{text:'Practice words',language:'en',model:'nova-3',durationMs:1000,confidence:null,cleanup:{ok:true,result:{text:'Practice words.',model:'gpt-6-luna',serviceTier:'fast'}}}}));
+ const saveHistory=vi.fn(async()=>{}),updateHistory=vi.fn(async()=>{});
+ Object.assign(bridge,{startStream:start,streamChunk:chunk,finishStream:finish,cancelStream:vi.fn(async()=>{}),saveHistory,updateHistory});
+ vi.resetModules();runtime=await import('../src/renderer/audio/runtime');runtime.initializeRecording();runtime.setTutorialMode(true);await flush();
+ try{
+  speaking();await flush();expect(start).toHaveBeenCalledWith(expect.objectContaining({practice:true}));
+  const pcm=fake.open.mock.calls[0][4] as (audio:ArrayBuffer)=>void;pcm(new ArrayBuffer(3200));await flush();
+  commandListener('finish');for(let i=0;i<8;i++)await flush();
+  expect(runtime.cleanup.getState()).toMatchObject({phase:'completed',result:{text:'Practice words.'}});
+  expect(finish).toHaveBeenCalledOnce();expect(fake.transcribe).not.toHaveBeenCalled();expect(fake.cleanup).not.toHaveBeenCalled();
+  expect(saveHistory).not.toHaveBeenCalled();expect(updateHistory).not.toHaveBeenCalled();expect(bridge.deliverText).not.toHaveBeenCalled();
+ }finally{runtime.setTutorialMode(false);}
+});

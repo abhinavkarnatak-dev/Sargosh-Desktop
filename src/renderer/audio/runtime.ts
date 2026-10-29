@@ -100,7 +100,7 @@ export function initializeRecording() {
   recording.subscribe(() => {
     const state = recording.getState();
     cues.observe(state);
-    if(state.sessionId!==sourceSession && state.sessionId && !tutorialMode && transcription.getState().automatic && state.phase==='opening')streaming.prepare(state.sessionId,transcription.getState().language,cleanup.getState().enabled);
+    if(state.sessionId!==sourceSession && state.sessionId && transcription.getState().automatic && state.phase==='opening')streaming.prepare(state.sessionId,transcription.getState().language,cleanup.getState().enabled,tutorialMode);
     if(state.phase==='recording'&&state.sessionId)streaming.activate(state.sessionId);
     if(['idle','cancelled','failed'].includes(state.phase))streaming.cancel();
     if (state.sessionId !== sourceSession) { sourceSession = state.sessionId; savingForTranscription = null; recovery = null; delivery.clear(); transcription.clear(); }

@@ -3,21 +3,21 @@ import type { SpeechLanguage, Transcript } from '../../shared/transcription';
 import { STREAM_BYTES_PER_SECOND, STREAM_MAX_BUFFER } from '../../shared/streaming';
 
 interface Session {
-  id:string;language:SpeechLanguage;cleanup:boolean;chunks:ArrayBuffer[];buffered:number;sent:number;limit:number;
+  id:string;language:SpeechLanguage;cleanup:boolean;practice:boolean;chunks:ArrayBuffer[];buffered:number;sent:number;limit:number;
   chain:Promise<void>;opening?:Promise<void>;unsupported:boolean;error?:Error;cancelled:boolean;limited:boolean;
 }
 // One owner controls recording chunks and the post-stop result. Never replay a partially sent stream.
 export class StreamingCapture {
   private session?:Session;
   constructor(private bridge:()=>DesktopBridge|undefined,private onLimit:()=>void){}
-  prepare(id:string,language:SpeechLanguage,cleanup:boolean){
+  prepare(id:string,language:SpeechLanguage,cleanup:boolean,practice=false){
     this.cancel();
     if(!this.bridge()?.startStream)return;
-    this.session={id,language,cleanup,chunks:[],buffered:0,sent:0,limit:300*STREAM_BYTES_PER_SECOND,chain:Promise.resolve(),unsupported:false,cancelled:false,limited:false};
+    this.session={id,language,cleanup,practice,chunks:[],buffered:0,sent:0,limit:(practice?20:300)*STREAM_BYTES_PER_SECOND,chain:Promise.resolve(),unsupported:false,cancelled:false,limited:false};
   }
   activate(id:string){
     const s=this.session;if(!s||s.id!==id||s.opening||s.cancelled)return;
-    s.opening=this.bridge()!.startStream!({requestId:id,traceId:id,language:s.language,cleanup:s.cleanup}).then(async result=>{
+    s.opening=this.bridge()!.startStream!({requestId:id,traceId:id,language:s.language,cleanup:s.cleanup,...(s.practice?{practice:true}:{})}).then(async result=>{
       if(s.cancelled){void this.bridge()?.cancelStream?.(id);return;}
       if(!result.ok){if(result.code==='STREAM_UNSUPPORTED'){s.unsupported=true;s.chunks=[];s.buffered=0;await this.bridge()?.cancelStream?.(id);return;}throw Object.assign(new Error(result.message),{code:result.code});}
       const seconds=(result as {maxAudioSeconds?:number}).maxAudioSeconds;

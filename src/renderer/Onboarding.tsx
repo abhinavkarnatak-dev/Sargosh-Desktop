@@ -85,6 +85,6 @@ export function Onboarding({ preferences, onSave }: { preferences: Preferences; 
       </>}
     </div>
     {error && <p className="error-message" role="alert">{error}</p>}
-    <footer className="onboarding-footer"><span>Step {step+1} of 3</span><div>{step > 0 && <button className="button secondary" disabled={blocked || editing} onClick={() => { setError(''); setStep(value => value-1); }}>Back</button>}<button className="button" disabled={blocked || editing} onClick={() => void next()}>{busy ? 'Please wait...' : step === 2 ? 'Finish setup' : 'Continue'}</button></div></footer>
+    <footer className="onboarding-footer"><span>Step {step+1} of 3</span><div>{step === 1 && <button className="button secondary" disabled={blocked || editing} onClick={() => { setError(''); setStep(value => value-1); }}>Back</button>}<button className="button" disabled={blocked || editing} onClick={() => void next()}>{busy ? 'Please wait...' : step === 2 ? 'Finish setup' : 'Continue'}</button></div></footer>
   </dialog>;
 }
