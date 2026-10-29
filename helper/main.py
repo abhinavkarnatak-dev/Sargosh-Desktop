@@ -167,6 +167,11 @@ class Store:
 
 
 def main():
+    # Frozen interpreters do not reliably honor PYTHONIOENCODING. Set the pipe
+    # encoding explicitly; outgoing JSON also retains its default ASCII escapes.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='strict')
     parser = argparse.ArgumentParser()
     parser.add_argument('--data-dir', required=True)
     args = parser.parse_args()

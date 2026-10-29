@@ -1,4 +1,6 @@
 import { DesktopStreamer } from './streaming';
+import { OverlayHitTest } from './overlay-hit';
+import { validOverlayRegions } from '../shared/overlay-hit';
 import { StoreUpdates } from './store-updates';
 import { NativeStoreBridge } from './store-bridge';
 import { registerStoreRestart } from './store-restart';
@@ -21,7 +23,7 @@ import { retrySavedTranscript } from './history-retry';
 import { LocalHistory } from './history';
 import { isHistoryId, type HistoryCapture, type HistoryResult } from '../shared/history';
 import { titleBarAppearance } from './titlebar';
-import { recoveryTextForCopy, validOverlayNotice } from '../shared/overlay-notice';
+import { recoveryTextForCopy, validOverlayNotice, type OverlayNotice } from '../shared/overlay-notice';
 import { DEFAULT_DOCK, validDockPreference } from '../shared/overlay-dock';
 import { OverlayDocking } from './overlay-docking';
 import { OverlayDropZones } from './overlay-drop-zones';
@@ -61,8 +63,14 @@ function startupFailed() {
   app.quit();
 }
 let overlayWindow: BrowserWindow | undefined;
+let allowanceWarning:OverlayNotice|null=null;
+function publishAllowanceWarning(value:OverlayNotice|null){
+  allowanceWarning=value;
+  if(overlayWindow&&!overlayWindow.isDestroyed())overlayWindow.webContents.send('sargosh:allowance-warning',value);
+}
 let overlayDocking: OverlayDocking | undefined;
 let overlayDrag: OverlayDrag | undefined;
+let overlayHit:OverlayHitTest|undefined;
 let overlayReducedMotion = false;
 const overlayZones = new OverlayDropZones();
 let dockWrites = Promise.resolve();
@@ -128,7 +136,12 @@ function createWindow(overlay = false): BrowserWindow {
     icon: path.join(root, 'assets', 'app-icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required' }
   });
-  if (overlay) enableOverlayInput(window);
+  if (overlay) {
+    enableOverlayInput(window);
+    overlayHit=new OverlayHitTest({bounds:()=>window.getBounds(),cursor:()=>screen.getCursorScreenPoint(),pressed:overlayMousePressed(),ignore:value=>{if(!window.isDestroyed())window.setIgnoreMouseEvents(value,{forward:true});},outsidePress:()=>{if(!window.isDestroyed())window.webContents.send('sargosh:overlay-outside-press');}});
+    window.webContents.on('did-start-loading',()=>{overlayHit?.drag(false);overlayHit?.update([]);});
+    window.once('closed',()=>{overlayHit?.dispose();overlayHit=undefined;});
+  }
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, url) => { if (!trustedURL(url)) event.preventDefault(); });
   if (rendererURL) void window.loadURL(rendererURL + (overlay ? '/#overlay' : '/')); else void window.loadFile(rendererFile, { hash: overlay ? 'overlay' : '' });
@@ -191,11 +204,13 @@ if (ownsLock) {
         await history.initialize(); finishedRecordings.clear();
         recordingUpdate({ ...INITIAL_RECORDING_STATE });
         transcriptionStatus = { phase: 'idle', message: '' };
+        publishAllowanceWarning(null);
         for (const window of [mainWindow, overlayWindow]) if (window && !window.isDestroyed()) window.webContents.send('sargosh:transcription-state', transcriptionStatus);
         // A fresh renderer drops previous audio previews, transcripts and cached history.
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload();
       } finally { accountChanging = false; }
     }, state => {
+      if(state.phase!=='signed-in')publishAllowanceWarning(null);
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('sargosh:auth-state', state);
       if (state.phase === 'signed-in') showMain();
     }, url => shell.openExternal(url));
@@ -335,6 +350,16 @@ if (ownsLock) {
       if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('sargosh:transcription-state', transcriptionStatus);
     });
     handle('sargosh:transcription-status', () => transcriptionStatus);
+    ipcMain.handle('sargosh:allowance-warning-report',(event,value:unknown)=>{
+      checkSender(event);
+      if(event.sender!==mainWindow?.webContents||(value!==null&&(!validOverlayNotice(value)||value.kind!=='warning'||value.text!==undefined)))throw new Error('Invalid allowance notice.');
+      if(value!==null)requireAccount();
+      publishAllowanceWarning(value as OverlayNotice|null);
+    });
+    ipcMain.handle('sargosh:allowance-warning-state',event=>{
+      checkSender(event);if(event.sender!==overlayWindow?.webContents)throw new Error('Invalid overlay request.');
+      return allowanceWarning;
+    });
 
     ipcMain.handle('sargosh:recording-report', (event, value: RecordingState) => {
       checkSender(event);
@@ -440,6 +465,11 @@ if (ownsLock) {
       if (event.sender !== overlayWindow?.webContents || !overlayWindow || typeof height !== 'number' || !Number.isFinite(height)) throw new Error('Invalid overlay size.');
       overlayDocking?.resize(height);
     });
+    ipcMain.handle('sargosh:overlay-hit-regions',(event,regions:unknown)=>{
+      checkSender(event);
+      if(event.sender!==overlayWindow?.webContents||!validOverlayRegions(regions))throw new Error('Invalid overlay input regions.');
+      overlayHit?.update(regions);
+    });
     handle('sargosh:open-settings', () => { showMain(); mainWindow?.webContents.send('sargosh:open-settings'); });
     ipcMain.handle('sargosh:window-theme', (event, theme: unknown) => {
       checkSender(event);
@@ -466,8 +496,8 @@ if (ownsLock) {
         const window = overlayWindow;
         overlayDrag = new OverlayDrag({ bounds: () => window.getBounds(), cursor: () => screen.getCursorScreenPoint(),
           area: point => screen.getDisplayNearestPoint(point).workArea, pressed: overlayMousePressed(),
-          move: (x, y) => window.setPosition(x, y, false), started: (pill, point) => overlayDocking?.start(pill, point),
-          moved: point => overlayDocking?.move(point), ended: point => overlayDocking?.end(point) });
+          move: (x, y) => window.setPosition(x, y, false), started: (pill, point) => {overlayHit?.drag(true);overlayDocking?.start(pill, point);},
+          moved: point => overlayDocking?.move(point), ended: point => {overlayDocking?.end(point);overlayHit?.drag(false);} });
         window.once('closed', () => { overlayDrag?.stop(false); overlayDocking?.dispose(); });
         window.webContents.on('did-start-loading', () => { overlayDrag?.stop(false); overlayDocking?.cancel(); });
       }

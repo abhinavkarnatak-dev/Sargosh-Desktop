@@ -52,3 +52,28 @@ it('reserves cleanup separately, reconciles token usage, and deduplicates cleanu
   expect(store.finish).toHaveBeenCalledWith(expect.objectContaining({kind:'cleanup'}),130);
  }finally{await app.close();}
 });
+
+it.each([false,true])('settles a failed standalone cleanup before accepting the next request, practice=%s',async practice=>{
+ let active=false;
+ const reserve=vi.fn<UsageStore['reserve']>(async(userId,requestId,kind)=>{if(active)throw new UsageError('BUSY','Another request is still processing for your account.');active=true;return {userId,requestId,kind,leaseId:'cleanup'};});
+ const store={snapshot:async()=>usage,reserve,reservePractice:reserve,dispatch:async()=>{},finish:vi.fn(async()=>{active=false;}),release:vi.fn(async()=>{})} as unknown as UsageStore;
+ const provider=vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({}, {status:429})).mockResolvedValue(Response.json({model:'gpt-6-luna',status:'completed',output:[{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'{"text":"Hello."}'}]}]}));
+ const app=createServer({hostedMode:true,allowedHosts:['api.test'],usageStore:store,verifySession:async()=> 'account-1',apiKey:'fixture',cleanupProvider:'openai',openaiApiKey:'fixture',openaiFetcher:provider});
+ const submit=(id:string)=>app.inject({method:'POST',url:practice?'/v1/practice/cleanup':'/v1/cleanup',headers:{host:'api.test',authorization:'Bearer valid','x-sargosh-request-id':id},payload:{text:'Um hello.',language:'en'}});
+ try{
+  expect((await submit('failed')).json().code).toBe('OPENAI_QUOTA');expect(active).toBe(false);
+  expect(store.finish).toHaveBeenCalledWith(expect.objectContaining({kind:'cleanup'}),undefined);expect(store.release).not.toHaveBeenCalled();
+  expect((await submit('next')).statusCode).toBe(200);
+ }finally{await app.close();}
+});
+
+it('reports service capacity without claiming the account already has a dictation',async()=>{
+ const x=setup(),waiting:Array<()=>void>=[];
+ x.provider.mockImplementation(async()=>{await new Promise<void>(resolve=>waiting.push(resolve));return Response.json({results:{channels:[{alternatives:[{transcript:'Hello.',confidence:.9}]}]},metadata:{duration:2}});});
+ const first=Promise.resolve(x.upload('one')),second=Promise.resolve(x.upload('two'));
+ try{
+  for(let i=0;i<30&&waiting.length<2;i++)await new Promise<void>(resolve=>setImmediate(resolve));
+  expect(waiting).toHaveLength(2);
+  const blocked=await x.upload('third');expect(blocked.statusCode).toBe(429);expect(blocked.json()).toEqual({code:'SERVICE_BUSY',message:'The service is busy. Please try again shortly.'});
+ }finally{waiting.forEach(resolve=>resolve());await Promise.all([first,second]);await x.app.close();}
+});

@@ -6,7 +6,7 @@ Speak in English, Hindi, or Hinglish using a custom shortcut. Sargosh streams sp
 
 [Website](https://sargosh.abhinavkarnatak.com) | [Get Sargosh from Microsoft Store](https://apps.microsoft.com/detail/9NCB52CT6X88)
 
-The current source version is **1.0.2**. Source changes, backend deployments, and Microsoft Store package updates are separate release steps; pushing this repository does not publish a desktop update.
+The current source version is **1.0.3**. Source changes, backend deployments, and Microsoft Store package updates are separate release steps; pushing this repository does not publish a desktop update.
 
 ## Using the desktop workspace
 
@@ -295,7 +295,7 @@ Protection stops at the next UTC monthly reset, preserving the ordinary daily an
 
 ## Windows installer
 
-The Windows x64 installer includes Electron and the local Python helper with its runtime. Users do not need Node.js, Python, or API keys. An internet connection and a microphone are required for dictation. Run `Sargosh-1.0.2-Setup.exe`, open Sargosh, sign in, and complete the microphone, shortcut, and practice setup. Closing the window keeps Sargosh in the tray; use Quit Sargosh to exit.
+The Windows x64 installer includes Electron and the local Python helper with its runtime. Users do not need Node.js, Python, or API keys. An internet connection and a microphone are required for dictation. Run `Sargosh-1.0.3-Setup.exe`, open Sargosh, sign in, and complete the microphone, shortcut, and practice setup. Closing the window keeps Sargosh in the tray; use Quit Sargosh to exit.
 
 Installed account data is stored under the Windows user's application data folder, separately from development data in `.local/`. Installing the app does not import development history or sign-in. Text delivery requires a writable input and may be restricted in elevated or protected applications. The direct installer has no automatic update check yet; updates require a new installer. The direct installer is unsigned, so Windows may show an unknown-publisher warning.
 
@@ -316,7 +316,7 @@ To inspect an unpacked application instead, use `npm run package`. Run `npm run 
 
 ### Microsoft Store package (MSIX)
 
-The Store build uses the same Electron app and bundled Python helper as the direct installer. Windows manages installation and updates, so Squirrel is not used in this distribution. The reserved identity is in `packaging/msix/identity.json`; its name, publisher, and publisher display name must exactly match Partner Center. Package version `1.0.2` becomes MSIX version `1.0.2.0`; increment the source version for later submissions and leave the fourth component at zero.
+The Store build uses the same Electron app and bundled Python helper as the direct installer. Windows manages installation and updates, so Squirrel is not used in this distribution. The reserved identity is in `packaging/msix/identity.json`; its name, publisher, and publisher display name must exactly match Partner Center. Package version `1.0.3` becomes MSIX version `1.0.3.0`; increment the source version for later submissions and leave the fourth component at zero.
 
 Build on Windows x64 with the existing source-build requirements and Windows SDK MSIX Packaging Tools (`MakeAppx.exe`). No additional npm library is required. `SARGOSH_MAKEAPPX` can select an explicit SDK executable when it is not installed in the normal Windows Kits location.
 
@@ -324,7 +324,7 @@ Build on Windows x64 with the existing source-build requirements and Windows SDK
 npm run make:msix
 ```
 
-The command rebuilds the app and Python helper, packages Electron, checks that packaged files match the current build and exclude private credentials, generates Store icons from the app logo, and creates `out/make/msix/x64/Sargosh-1.0.2.0-x64.msix`. It then extracts the actual MSIX and compares every application file, including the Python helper/runtime, against the verified Electron package. The manifest requests full-trust desktop execution, internet access, and microphone access. The build does not request administrator privileges or UIAccess.
+The command rebuilds the app and Python helper, packages Electron, checks that packaged files match the current build and exclude private credentials, generates Store icons from the app logo, and creates `out/make/msix/x64/Sargosh-1.0.3.0-x64.msix`. It then extracts the actual MSIX and compares every application file, including the Python helper/runtime, against the verified Electron package. The manifest requests full-trust desktop execution, internet access, and microphone access. The build does not request administrator privileges or UIAccess.
 
 This output is an **unsigned Store submission package**, not a publicly trusted installer for sharing directly. Upload it to the MSIX product's Packages section in Partner Center. Microsoft signs approved Store packages and delivers updates. Registering or installing a development package locally does not prove that the Store-delivered package works on another computer. Store certification, package-identity testing, and testing on a separate Windows device remain necessary.
 

@@ -24,3 +24,18 @@ it.each(['local','browser','failed'] as const)('explains unavailable usage inste
  }
  }finally{await act(async()=>root.unmount());host.remove();delete window.sargosh;vi.unstubAllGlobals();}
 });
+
+it.each([60,0])('shows an inline allowance alert with the appropriate symbol at %s seconds',async seconds=>{
+ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
+ window.sargosh={usage:async()=>({enabled:true,dailyLimitSeconds:600,monthlyLimitSeconds:6000,dailyUsedSeconds:600-seconds,monthlyUsedSeconds:0,dailyResetAt:'2026-10-30T00:00:00Z',monthlyResetAt:'2026-11-01T00:00:00Z'})} as unknown as NonNullable<typeof window.sargosh>;
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{
+  await act(async()=>root.render(createElement(UsagePanel)));
+  const alert=host.querySelector('.allowance-alert');
+  expect(alert?.querySelector('svg')).not.toBeNull();
+  expect(alert?.classList.contains('allowance-alert-reached')).toBe(seconds===0);
+  expect(alert?.textContent).toContain(seconds===0?'reached your daily allowance':'1 minute or less');
+  expect(host.querySelector('.allowance-alerts')?.nextElementSibling?.className).toBe('usage-grid');
+  expect(host.querySelector('.toast')).toBeNull();
+ }finally{await act(async()=>root.unmount());host.remove();delete window.sargosh;vi.unstubAllGlobals();}
+});

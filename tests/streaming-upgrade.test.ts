@@ -76,3 +76,12 @@ it('releases disconnected pending handshakes and ignores authorization that comp
   } finally { await s.close(); }
 });
 
+
+it('reports shared service capacity distinctly from an account already processing',async()=>{
+ const waiting:Array<(owner:string)=>void>=[];const s=setup(()=>new Promise<string>(resolve=>waiting.push(resolve)));
+ try{
+  s.attempt('one');s.attempt('two');const rejected=s.attempt('capacity');
+  expect(rejected.response).toContain('429 Rejected');expect(rejected.response).toContain('SERVICE_BUSY');expect(rejected.response).toContain('The service is busy.');
+  waiting.forEach((resolve,index)=>resolve('owner-'+index));await tick();
+ }finally{await s.close();}
+});

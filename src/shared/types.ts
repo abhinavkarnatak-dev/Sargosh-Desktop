@@ -47,6 +47,11 @@ export interface DesktopBridge {
   onOverlayDock?(listener: (state: import('./overlay-dock').DockState) => void): () => void;
   copyOverlayText(noticeId: string): Promise<void>;
   resizeOverlay(height: number): Promise<void>;
+  overlayHitRegions?(regions:import('./overlay-hit').OverlayHitRegion[]):Promise<void>;
+  onOverlayOutsidePress?(listener:()=>void):()=>void;
+  reportAllowanceWarning?(notice:import('./overlay-notice').OverlayNotice|null):Promise<void>;
+  allowanceWarning?():Promise<import('./overlay-notice').OverlayNotice|null>;
+  onAllowanceWarning?(listener:(notice:import('./overlay-notice').OverlayNotice|null)=>void):()=>void;
   openSettings(): Promise<void>;
   onOpenSettings(listener: () => void): () => void;
   deliverText(request: DeliveryRequest): Promise<DeliveryResult>;

@@ -1,3 +1,4 @@
+import { readStreamRejection } from './stream-rejection';
 import WebSocket from 'ws';
 import { apiEndpoint, hostedEndpoint } from '../shared/api-endpoint';
 import { STREAM_BYTES_PER_SECOND, STREAM_MAX_CHUNK, type StreamRequest, type StreamStart, type StreamResult } from '../shared/streaming';
@@ -59,12 +60,7 @@ export class DesktopStreamer {
       const socket=this.connect(url,{headers,handshakeTimeout:10000,maxPayload:1024*1024,followRedirects:false,perMessageDeflate:false});active.socket=socket;
       socket.on('unexpected-response',(_req,response)=>{
         handshake.end('failed',{statusCode:response.statusCode,handshakeFailure:'http-rejected'});
-        response.resume();
-        const status=response.statusCode;
-        if(status===404||status===501)fail('STREAM_UNSUPPORTED','Live dictation is not available on this backend.');
-        else if(status===429)fail('BUSY','A dictation is already processing. Wait for it to finish, then try again.');
-        else if(status===401)fail('AUTH_REQUIRED','The live session could not be verified. Sign in again and retry.');
-        else fail('STREAM_CONNECTION','Live dictation could not start. Check the service and your connection.');
+        void readStreamRejection(response).then(error=>fail(error.code,error.message));
       });
       socket.on('open',()=>handshake.end('ok',{statusCode:101}));
       socket.on('message',raw=>{

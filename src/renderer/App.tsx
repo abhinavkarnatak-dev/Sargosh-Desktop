@@ -1,4 +1,6 @@
 import { WaveHeading } from './WaveHeading';
+import { AllowanceWarning, type AllowanceStatus } from './AllowanceWarning';
+import { UsageNavIcon } from './UsageNavIcon';
 import { BrandRipple } from './BrandRipple';
 import { SidebarLogo } from './SidebarLogo';
 import { StartupReady } from './StartupReady';
@@ -32,6 +34,7 @@ function Workspace({ account }: { account: AccountUser | null }) {
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY_SNAPSHOT);
   const [snapshotReady, setSnapshotReady] = useState(!window.sargosh);
   const [settings, setSettings] = useState(false);
+  const [allowanceStatus,setAllowanceStatus]=useState<AllowanceStatus>(null);
   const [notice, updateNotice] = useState({ message: '', id: 0 });
   const setNotice = useCallback((message: string) => updateNotice(current => ({ message, id: current.id + 1 })), []);
   const dismissNotice = useCallback(() => setNotice(''), [setNotice]);
@@ -68,19 +71,20 @@ function Workspace({ account }: { account: AccountUser | null }) {
   useEffect(() => { setRecordingPreferences(snapshot.preferences); }, [snapshot.preferences]);
   const collapsed = snapshot.preferences.collapsed;
   return <div className="app-frame"><BrandRipple /><StartupReady ready={snapshotReady} />
+    {account && <AllowanceWarning accountId={account.id} enabled={snapshotReady&&!account.onboardingRequired} onStatus={setAllowanceStatus} />}
     <header className="desktop-titlebar" aria-label="Window title bar"><button className="icon-button sidebar-toggle" data-tooltip-placement="bottom" aria-expanded={!collapsed} aria-controls="sargosh-sidebar" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => void savePreferences({ collapsed: !collapsed })}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button></header>
     <div className={collapsed ? 'app-shell collapsed' : 'app-shell'}>
     <aside className="sidebar" id="sargosh-sidebar">
       <div className="sidebar-top">
 
-        <a className="brand" href="#" aria-label="Sargosh home" onClick={event => { event.preventDefault(); setPage('dictation'); }}>
+        <a className="brand" href="#" aria-label="Sargosh" onClick={event => { event.preventDefault(); }}>
           <SidebarLogo />
           <span className="sidebar-label"><span className="brand-wordmark">sargosh<span className="brand-period">.</span></span><span className="brand-caption">A little less typing.</span></span>
         </a>
         <nav aria-label="Main navigation">
           <button aria-label="Dictation" data-tooltip={collapsed ? 'Dictation' : ''} data-tooltip-placement="right" className={page === 'dictation' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('dictation')}><Mic size={19} /><span className="sidebar-label">Dictation</span></button>
           <button aria-label="Insights" data-tooltip={collapsed ? 'Insights' : ''} data-tooltip-placement="right" className={page === 'insights' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('insights')}><BarChart3 size={19} /><span className="sidebar-label">Insights</span></button>
-          <button aria-label="Usage" data-tooltip={collapsed ? 'Usage' : ''} data-tooltip-placement="right" aria-current={page === 'usage' ? 'page' : undefined} className={page === 'usage' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('usage')}><Gauge size={19} /><span className="sidebar-label">Usage</span></button>
+          <button aria-label="Usage" data-allowance={allowanceStatus??undefined} data-tooltip={collapsed ? allowanceStatus==='reached'?'Usage - Allowance reached':allowanceStatus==='low'?'Usage - Allowance running low':'Usage' : ''} data-tooltip-placement="right" aria-current={page === 'usage' ? 'page' : undefined} className={page === 'usage' ? 'nav-item active' : 'nav-item'} onClick={() => setPage('usage')}><Gauge size={19}/><span className="sidebar-label">Usage</span><UsageNavIcon status={allowanceStatus}/></button>
         </nav>
       </div>
       <div className="sidebar-bottom">

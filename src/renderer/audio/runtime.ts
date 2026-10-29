@@ -1,4 +1,6 @@
+import { allowanceAlerts, validAccountUsage } from '../../shared/usage';
 import { RecordingCues, createCuePlayer } from './recording-cues';
+import { syncSpeechLanguage } from '../speech-language';
 import { StreamingCapture } from './streaming';
 import { setPracticeSession } from './practice';
 import { savedHistory } from './history';
@@ -81,12 +83,29 @@ export function cancelRecording() {
     void window.sargosh?.windowsAction('cancel').catch(() => {});
   }
 }
+async function recordingAllowance():Promise<boolean> {
+  if(tutorialMode||!window.sargosh?.usage)return true;
+  let timeout:ReturnType<typeof setTimeout>|undefined;
+  try {
+    const usage=await Promise.race([window.sargosh.usage(),new Promise<never>((_,reject)=>{timeout=setTimeout(()=>reject(new Error('Allowance timed out')),5000);})]);
+    if(!usage)return true; // Local API mode does not track account usage.
+    if(!validAccountUsage(usage))throw new Error('Invalid allowance');
+    const reached=allowanceAlerts(usage).filter(alert=>alert.reached);
+    if(!reached.length)return true;
+    await window.sargosh.reportAllowanceWarning?.({id:'allowance:attempt:'+crypto.randomUUID()+':'+reached.map(alert=>alert.id).join('|'),kind:'warning',title:'Allowance reached',message:reached.map(alert=>alert.message).join(' ')});
+  } catch {
+    void window.sargosh?.reportTranscription({phase:'failed',message:'Could not check your allowance. Please try again.',notice:{id:'allowance-check:'+crypto.randomUUID(),kind:'error',title:'Could not start recording',message:'Could not check your allowance. Please try again.'}}).catch(()=>{});
+  } finally {clearTimeout(timeout);}
+  return false;
+}
 export async function startRecording() {
   if (recordingBusy(recording.getState()) || cloudBusy()) return;
   if (native?.purpose === 'recording' && native.enabled) {
     const state = await window.sargosh!.windowsAction('start-hands-free');
-    native = state; recording.native(state, preferences.microphoneId);
+    if(!window.sargosh?.usage || tutorialMode){native = state; recording.native(state, preferences.microphoneId);}
   } else {
+    if(!await recordingAllowance())return;
+    if(recordingBusy(recording.getState())||cloudBusy())return;
     if (native?.enabled) await window.sargosh?.windowsAction('disarm');
     recording.begin(crypto.randomUUID(), preferences.microphoneId, 'manual');
   }
@@ -94,6 +113,8 @@ export async function startRecording() {
 export function initializeRecording() {
   if (initialized) return;
   initialized = true;
+  const releaseLanguage = syncSpeechLanguage(transcription, () => recordingBusy(recording.getState()) || cloudBusy());
+  window.addEventListener('pagehide', releaseLanguage, { once: true });
   initializeTimingOutput();
   const cues=new RecordingCues(createCuePlayer());
   window.sargosh?.onDeliveryFirstInput?.(markFirstInput);
@@ -197,11 +218,27 @@ export function initializeRecording() {
     remember(); maybeDeliver(); reportCloud(); finishTiming();
   });
   if (window.sargosh) {
+    let checkedSession:string|null=null, checkingSession:string|null=null, blockedSession:string|null=null;
     const update = (state: WindowsState) => {
       if (native && state.revision < native.revision) return;
       native = state;
       if (cloudBusy() && state.purpose === 'recording' && ['pending', 'listening'].includes(state.phase) && state.sessionId !== recording.getState().sessionId) {
         void window.sargosh!.windowsAction('cancel').catch(() => {}); return;
+      }
+      if(!tutorialMode&&window.sargosh?.usage&&state.purpose==='recording'&&state.enabled&&state.sessionId&&['pending','listening'].includes(state.phase)&&state.sessionId!==checkedSession){
+        const id=state.sessionId;
+        if(checkingSession===id||blockedSession===id)return;
+        checkingSession=id;
+        void recordingAllowance().then(allowed=>{
+          if(checkingSession!==id)return;
+          checkingSession=null;
+          // Releasing/cancelling a shortcut while checking must not open the mic later.
+          if(native?.sessionId!==id||!native.enabled||!['pending','listening'].includes(native.phase))return;
+          if(!allowed){blockedSession=id;void window.sargosh!.windowsAction('cancel').catch(()=>{});return;}
+          checkedSession=id;
+          update(native);
+        });
+        return;
       }
       if (!recording.native(state, preferences.microphoneId) && state.purpose === 'recording') {
         void window.sargosh!.windowsAction('cancel').catch(() => {});

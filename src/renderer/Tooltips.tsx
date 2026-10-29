@@ -67,5 +67,5 @@ export function Tooltips() {
     else if (place === 'bottom' || top < 8) { top = anchor.bottom + 9; if (top + bounds.height > window.innerHeight - 8) top = anchor.top - bounds.height - 9; }
     setPosition({ left: Math.max(8, Math.min(left, window.innerWidth - bounds.width - 8)), top: Math.max(8, Math.min(top, window.innerHeight - bounds.height - 8)) });
   }, [tip]);
-  return tip ? createPortal(<div ref={bubble} id={id} role="tooltip" className="custom-tooltip" data-closing={tip.closing} style={position}>{tip.text}</div>, tip.anchor.closest('dialog[open]') ?? document.body) : null;
+  return tip ? createPortal(<div ref={bubble} id={id} role="tooltip" data-tone={tip.anchor.dataset.tooltipTone} className="custom-tooltip" data-closing={tip.closing} style={position}>{tip.text}</div>, tip.anchor.closest('dialog[open]') ?? document.body) : null;
 }

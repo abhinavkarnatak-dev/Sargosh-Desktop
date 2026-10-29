@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
@@ -55,7 +56,7 @@ function service(practice=false,practiceFailure?:UsageError){
   const live={ready:Promise.resolve(),send:vi.fn((data:Buffer)=>received.push(data)),finish:vi.fn(()=>finalResult.promise),cancel:vi.fn()};
   const lease={userId:'owner',requestId:'stream',kind:'stt' as const,leaseId:'lease'};
   const store={snapshot:vi.fn(async()=>({enabled:true,dailyLimitSeconds:600,monthlyLimitSeconds:6000,dailyUsedSeconds:practice?600:0,monthlyUsedSeconds:practice?6000:0,dailyResetAt:'',monthlyResetAt:''})),reserveStream:vi.fn(async()=>lease),reservePracticeStream:vi.fn(async()=>lease),reservePractice:vi.fn(async()=>({...lease,kind:'cleanup' as const})),reserve:vi.fn(async()=>({...lease,kind:'cleanup' as const})),dispatch:vi.fn(async()=>{}),finish:vi.fn(async()=>{}),release:vi.fn(async()=>{}),finishStream:vi.fn(async()=>{})};
-  const clean=vi.fn(async()=>Response.json({id:'fixture',model:'gpt-6-luna',status:'completed',service_tier:'fast',output:[{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'{"text":"A final sentence."}'}]}],usage:{input_tokens:50,output_tokens:10}}));
+  const clean=vi.fn<typeof fetch>(async()=>Response.json({id:'fixture',model:'gpt-6-luna',status:'completed',service_tier:'fast',output:[{type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'{"text":"A final sentence."}'}]}],usage:{input_tokens:50,output_tokens:10}}));
   const options:StreamOptions={enabled:true,apiKey:'fixture',store,cleanupProvider:'openai',openaiApiKey:'fixture',openaiFetcher:clean,authorize:async()=> 'owner',openRecognizer:()=>live};
   if(practiceFailure)store.reservePracticeStream.mockRejectedValue(practiceFailure);
   const done=serveStream(socket as unknown as WebSocket,'owner','stream','en',true,options,practice);
@@ -168,7 +169,20 @@ it('records the actual handshake status and network failure without credentials 
   expect(JSON.stringify(events)).not.toMatch(/private-token|private upstream/);client.cancel();
   const rejectedSocket=new Socket();const rejected=new DesktopStreamer(async()=> 'private-token','https://api.example.com',fetch,()=>rejectedSocket as unknown as WebSocket);
   const pending=rejected.start({requestId:'rejected',traceId:'rejected',language:'en',cleanup:true});await flush();
-  rejectedSocket.emit('unexpected-response',{}, {statusCode:429,resume:vi.fn()});
+  rejectedSocket.emit('unexpected-response',{}, Object.assign(Readable.from([Buffer.from(JSON.stringify({code:'BUSY'}))]),{statusCode:429}));
   expect(await pending).toMatchObject({ok:false,code:'BUSY'});
   expect(events).toContainEqual(expect.objectContaining({stage:'stream.handshake',statusCode:429,handshakeFailure:'http-rejected'}));rejected.cancel();
+});
+
+it.each([false,true])('settles failed dispatched cleanup without refunding it for practice=%s',async practice=>{
+ const s=service(practice);s.clean.mockResolvedValue(Response.json({}, {status:429}));await flush();s.audio();await flush();s.finish();s.finalResult.resolve(transcript);await s.done;
+ expect(s.socket.sent.at(-1)).toMatchObject({type:'result',result:{cleanup:{ok:false,code:'OPENAI_QUOTA'}}});
+ expect(s.store.finish).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({kind:'cleanup'}),undefined);
+ expect(s.store.release).not.toHaveBeenCalled();expect(s.store.finishStream).toHaveBeenCalledOnce();
+});
+it('settles cleanup when a stream is cancelled after dispatch',async()=>{
+ const s=service();let started=false;
+ s.clean.mockImplementation(async(_url:unknown,options?:RequestInit)=>{started=true;return new Promise<Response>((_resolve,reject)=>{options!.signal!.addEventListener('abort',()=>reject(new DOMException('Cancelled','AbortError')),{once:true});});});
+ await flush();s.audio();await flush();s.finish();s.finalResult.resolve(transcript);await flush();expect(started).toBe(true);
+ s.socket.close();await s.done;expect(s.store.finish).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({kind:'cleanup'}),undefined);expect(s.store.release).not.toHaveBeenCalled();
 });

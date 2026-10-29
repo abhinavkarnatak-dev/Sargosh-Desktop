@@ -34,3 +34,6 @@
 :root[data-surface=overlay] .overlay-notice-actions button{background:var(--accent);color:var(--overlay-action-text)}
 :root[data-surface=overlay] .overlay-notice-actions span{color:var(--overlay-error)}
 :root[data-surface=overlay] .overlay-recovery-text{background:var(--panel);color:var(--text);border-color:var(--border)}
+
+:root[data-surface=overlay] .custom-tooltip[data-tone=danger]{color:#ef9387;border-color:#b6534866}
+:root[data-surface=overlay]:not([data-theme=dark]) .custom-tooltip[data-tone=danger]{color:#b2362b;border-color:#b2362b55}

@@ -2,6 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { helperCommand } from './helper-command';
 interface Pending { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
+// ASCII JSON is independent of the packaged Python interpreter's Windows code page.
+export const helperMessage = (value: unknown) => JSON.stringify(value).replace(/[\u007f-\uffff]/g, character => '\\u'+character.charCodeAt(0).toString(16).padStart(4,'0'))+'\n';
 export class Helper {
   private child?: ChildProcessWithoutNullStreams;
   private pending = new Map<number, Pending>();
@@ -52,7 +54,7 @@ export class Helper {
         reject(new Error('The local helper did not respond.'));
       }, timeoutMs);
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timer });
-      this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n', error => {
+      this.child.stdin.write(helperMessage({ id, method, params }), error => {
         if (error) { clearTimeout(timer); this.pending.delete(id); reject(new Error('Could not reach the local helper.')); }
       });
     });

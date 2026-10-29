@@ -406,3 +406,52 @@ it('streams tutorial practice without saving history, changing Insights, or inse
   expect(saveHistory).not.toHaveBeenCalled();expect(updateHistory).not.toHaveBeenCalled();expect(bridge.deliverText).not.toHaveBeenCalled();
  }finally{runtime.setTutorialMode(false);}
 });
+
+const allowanceUsage=(seconds:number)=>({enabled:true,dailyLimitSeconds:600,monthlyLimitSeconds:6000,dailyUsedSeconds:600-seconds,monthlyUsedSeconds:0,dailyResetAt:'2099-10-30T00:00:00Z',monthlyResetAt:'2099-11-01T00:00:00Z'});
+it.each(['daily','monthly'])('blocks microphone capture before a shortcut when the %s allowance is exhausted',async period=>{
+ const value=allowanceUsage(period==='daily'?0:300);if(period==='monthly')value.monthlyUsedSeconds=6000;
+ const report=vi.fn(async()=>{});Object.assign(bridge,{usage:vi.fn(async()=>value),reportAllowanceWarning:report});
+ speaking();await flush();
+ expect(fake.open).not.toHaveBeenCalled();expect(fake.transcribe).not.toHaveBeenCalled();
+ expect(bridge.windowsAction).toHaveBeenCalledWith('cancel');
+ expect(report).toHaveBeenCalledWith(expect.objectContaining({title:'Allowance reached',message:expect.stringContaining(period)}));
+});
+it('checks once per shortcut session before opening audio and leaves a low allowance usable',async()=>{
+ const usage=vi.fn(async()=>allowanceUsage(30));Object.assign(bridge,{usage});
+ speaking();expect(fake.open).not.toHaveBeenCalled();await flush();
+ expect(usage).toHaveBeenCalledOnce();expect(fake.open).toHaveBeenCalledOnce();
+});
+it('does not open audio after a shortcut is released while its allowance check is pending',async()=>{
+ let resolve!:(value:ReturnType<typeof allowanceUsage>)=>void;
+ Object.assign(bridge,{usage:()=>new Promise(done=>{resolve=done;})});
+ speaking();native={...native,revision:native.revision+1,phase:'finished'};nativeListener(native);
+ resolve(allowanceUsage(300));await flush();expect(fake.open).not.toHaveBeenCalled();
+});
+it('leaves practice recording independent of an exhausted normal allowance',async()=>{
+ const usage=vi.fn(async()=>allowanceUsage(0));Object.assign(bridge,{usage});runtime.setTutorialMode(true);
+ try{speaking();await flush();expect(usage).not.toHaveBeenCalled();expect(fake.open).toHaveBeenCalledOnce();}finally{runtime.setTutorialMode(false);}
+});
+it('does not open audio when the pre-recording allowance check fails',async()=>{
+ Object.assign(bridge,{usage:vi.fn().mockRejectedValue(new Error('Offline'))});speaking();await flush();
+ expect(fake.open).not.toHaveBeenCalled();expect(bridge.windowsAction).toHaveBeenCalledWith('cancel');
+ expect(bridge.reportTranscription).toHaveBeenCalledWith(expect.objectContaining({message:'Could not check your allowance. Please try again.'}));
+});
+
+it('times out an unavailable allowance check before capture and allows a later retry',async()=>{
+ const usage=vi.fn().mockImplementationOnce(()=>new Promise(()=>{})).mockResolvedValue(allowanceUsage(300));
+ Object.assign(bridge,{usage});speaking();await flush();
+ await vi.advanceTimersByTimeAsync(5000);await flush();expect(fake.open).not.toHaveBeenCalled();
+ expect(bridge.windowsAction).toHaveBeenCalledWith('cancel');
+ native={...native,revision:native.revision+1,phase:'pending',sessionId:'retry-session'};nativeListener(native);
+ native={...native,revision:native.revision+1,phase:'listening'};nativeListener(native);await flush();
+ expect(fake.open).toHaveBeenCalledOnce();
+});
+
+it('gives each exhausted shortcut attempt a fresh warning ID without opening the microphone',async()=>{
+ const report=vi.fn(async(_notice:import('../src/shared/overlay-notice').OverlayNotice)=>{});Object.assign(bridge,{usage:vi.fn(async()=>allowanceUsage(0)),reportAllowanceWarning:report});
+ speaking();await flush();
+ native={...native,revision:native.revision+1,phase:'pending',sessionId:'second-denied'};nativeListener(native);
+ native={...native,revision:native.revision+1,phase:'listening'};nativeListener(native);await flush();
+ expect(report).toHaveBeenCalledTimes(2);expect(report.mock.calls[0][0].id).not.toBe(report.mock.calls[1][0].id);
+ expect(report.mock.calls[1][0].id).toMatch(/^allowance:attempt:/);expect(fake.open).not.toHaveBeenCalled();
+});

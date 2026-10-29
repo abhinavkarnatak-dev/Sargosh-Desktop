@@ -80,3 +80,12 @@ it('settles a reserved live window to server-counted seconds without accepting s
  expect((await reserve('after-live',1)).code).toBe('OK');
  const permission=await db.query<{blocked:boolean}>("select not has_function_privilege('authenticated','public.finish_stream_usage(uuid,text,text,uuid,integer,bigint)','EXECUTE') blocked");expect(permission.rows[0].blocked).toBe(true);
 });
+
+it('ends failed dispatched cleanup immediately while retaining its spending charge',async()=>{
+ await reset();const cleanup=await reserve('failed-cleanup',0,user,'cleanup',1200);
+ await db.query("select public.dispatch_usage($1,'failed-cleanup','cleanup',$2)",[user,cleanup.leaseId]);
+ expect((await reserve('blocked',1)).code).toBe('BUSY');
+ await db.query("select public.finish_usage($1,'failed-cleanup','cleanup',$2)",[user,cleanup.leaseId]);
+ const row=(await db.query<{state:string;cost_micro:number}>("select state,cost_micro from sargosh_private.usage_operations where user_id=$1 and request_id='failed-cleanup'",[user])).rows[0];
+ expect(row.state).toBe('done');expect(Number(row.cost_micro)).toBe(1200);expect((await reserve('next',1)).code).toBe('OK');
+});

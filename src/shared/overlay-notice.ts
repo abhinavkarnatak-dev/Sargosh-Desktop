@@ -1,11 +1,11 @@
 import type { RecordingState } from './recording';
 import type { TranscriptionStatus } from './transcription';
-export interface OverlayNotice { id: string; kind: 'error' | 'info' | 'recovery'; title: string; message: string; text?: string }
+export interface OverlayNotice { id: string; kind: 'error' | 'info' | 'recovery' | 'warning'; title: string; message: string; text?: string }
 export function validOverlayNotice(value: unknown): value is OverlayNotice {
   if (!value || typeof value !== 'object') return false;
   const notice = value as OverlayNotice;
   return typeof notice.id === 'string' && notice.id.length > 0 && notice.id.length <= 150 &&
-    ['error', 'info', 'recovery'].includes(notice.kind) && typeof notice.title === 'string' && notice.title.length <= 100 &&
+    ['error', 'info', 'recovery', 'warning'].includes(notice.kind) && typeof notice.title === 'string' && notice.title.length <= 100 &&
     typeof notice.message === 'string' && notice.message.length <= 400 &&
     (notice.text === undefined || typeof notice.text === 'string' && notice.text.length <= 24000);
 }

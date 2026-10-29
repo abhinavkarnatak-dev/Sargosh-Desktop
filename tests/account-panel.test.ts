@@ -17,7 +17,7 @@ it('requires an explicit typed confirmation, cancels safely, and prevents duplic
     await click(open());
     let dialog = host.querySelector('dialog')!;
     expect(dialog.open).toBe(true); expect(dialog.textContent).toContain('cannot be undone');
-    expect(dialog.textContent).toContain('protected email identifier');expect(dialog.textContent).toContain('current monthly allowance resets');
+    expect(dialog.textContent).toContain('protected email identifier');expect(dialog.textContent).toContain('within an hour after the monthly reset');
     expect(dialog.textContent).not.toContain('retained without your name or email');
     expect(dialog.querySelector<HTMLButtonElement>('.danger')!.disabled).toBe(true);
     await click(dialog.querySelector('.secondary')!);expect(dialog.dataset.closing).toBe('true');await act(async()=>vi.advanceTimersByTime(180)); expect(host.querySelector('dialog')).toBeNull(); expect(remove).not.toHaveBeenCalled();

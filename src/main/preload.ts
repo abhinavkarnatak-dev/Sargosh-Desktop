@@ -11,6 +11,11 @@ async function authCall(channel: string, value?: unknown) {
   }
 }
 const bridge: DesktopBridge = {
+  overlayHitRegions:regions=>ipcRenderer.invoke('sargosh:overlay-hit-regions',regions),
+  reportAllowanceWarning:notice=>ipcRenderer.invoke('sargosh:allowance-warning-report',notice),
+  allowanceWarning:()=>ipcRenderer.invoke('sargosh:allowance-warning-state'),
+  onAllowanceWarning:listener=>{const handler=(_event:Electron.IpcRendererEvent,notice:import('../shared/overlay-notice').OverlayNotice|null)=>listener(notice);ipcRenderer.on('sargosh:allowance-warning',handler);return()=>ipcRenderer.removeListener('sargosh:allowance-warning',handler);},
+  onOverlayOutsidePress:listener=>{const handler=()=>listener();ipcRenderer.on('sargosh:overlay-outside-press',handler);return()=>ipcRenderer.removeListener('sargosh:overlay-outside-press',handler);},
   storeUpdateState:()=>ipcRenderer.invoke('sargosh:store-update-state'),
   storeUpdateAction:action=>ipcRenderer.invoke('sargosh:store-update-action',action),
   onStoreUpdate:listener=>{const handler=(_event:Electron.IpcRendererEvent,state:import('../shared/store-update').StoreUpdateState)=>listener(state);ipcRenderer.on('sargosh:store-update',handler);return()=>{ipcRenderer.removeListener('sargosh:store-update',handler);};},

@@ -134,3 +134,16 @@ it('reserves retry headroom up front and keeps uncertain failed-attempt spend af
     expect(x.store.reserve.mock.calls.filter(call => call[2] === 'stt')).toHaveLength(1);
   } finally { await x.app.close(); }
 });
+
+it.each([false,true])('unblocks a new dictation immediately after failed cleanup with practice=%s, retaining spending',async practice=>{
+ const x=fixture();let active=false;
+ const reserve=async(userId:string,requestId:string,kind:'stt'|'cleanup')=>{if(active)throw new UsageError('BUSY','Another request is still processing for your account.');active=true;return {userId,requestId,kind,leaseId:'lease-'+kind};};
+ x.store.reserve.mockImplementation(reserve);x.store.reservePractice.mockImplementation(reserve);
+ x.store.finish.mockImplementation(async()=>{active=false;});
+ x.llm.mockResolvedValueOnce(Response.json({}, {status:429}));
+ try{
+  expect((await x.send(practice)).json().cleanup).toMatchObject({ok:false,code:'GEMINI_QUOTA'});expect(active).toBe(false);
+  expect(x.store.finish).toHaveBeenLastCalledWith(expect.objectContaining({kind:'cleanup'}),undefined);expect(x.store.release).not.toHaveBeenCalled();
+  const retry=await x.send(practice,{'x-sargosh-request-id':'next'});expect(retry.statusCode).toBe(200);expect(retry.json().cleanup.ok).toBe(true);expect(active).toBe(false);
+ }finally{await x.app.close();}
+});

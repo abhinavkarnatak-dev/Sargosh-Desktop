@@ -96,7 +96,7 @@ export function createHostedServer(options:HostedOptions){
    // Verify account eligibility before decoding untrusted audio.
    if(!(await timeRequest(request,'server.eligibility',()=>store.snapshot(owner))).enabled)throw new UsageError('AUTH_REQUIRED','Verify your email before using cloud dictation.',403);
    const previous=cached(owner,combined?'dictation':'stt',id,fingerprint);if(previous){markCached(request);return previous;}
-   if(active>=2)throw new UsageError('BUSY','The service is processing other recordings. Please try shortly.');active++;entered=true;
+   if(active>=2)throw new UsageError('SERVICE_BUSY','The service is busy. Please try again shortly.');active++;entered=true;
    request.raw.once('aborted',disconnect);reply.raw.once('close',disconnect);
    const normalized=await timeRequest(request,'server.normalize',()=>(options.normalize??((bytes,signal)=>normalizeAudio(bytes,signal,options.ffmpegPath)))(request.body as Buffer,abort.signal),{bytes:request.body.length},abort.signal);
    if(!Number.isInteger(normalized.durationSeconds)||normalized.durationSeconds<1||normalized.durationSeconds>300)throw new AudioError('RECORDING_LIMIT','A recording can be at most 5 minutes.');
@@ -109,7 +109,7 @@ export function createHostedServer(options:HostedOptions){
    const result=await timeRequest(request,'server.stt',()=>recognizeAudio({apiKey:options.apiKey!,audio:normalized.audio,mimeType:'audio/wav',language,signal:abort.signal,fetcher:options.fetcher,measure:providerTiming(request,'stt')}),{audioMs:normalized.durationSeconds*1000,model:'nova-3'},abort.signal);
    await timeRequest(request,'server.finish',()=>store.finish(lease!));
    if(combined && result.text.trim()) {
-    let cleanupLease:UsageLease|undefined,cleanupDispatched=false;
+    let cleanupLease:UsageLease|undefined,cleanupDispatched=false,actualCost:number|undefined;
     try {
      if(abort.signal.aborted)throw new CleanupError('CANCELLED','Cleanup cancelled.',499);
      const model=cleanup.model,text=result.text;
@@ -120,15 +120,14 @@ export function createHostedServer(options:HostedOptions){
      cleanupLease=await timeRequest(request,'server.reserve',()=>practice?store.reservePractice!(owner,id,'cleanup',cleanupFingerprint,0,reservedCost):store.reserve(owner,id,'cleanup',cleanupFingerprint,0,reservedCost));
      if(abort.signal.aborted)throw new CleanupError('CANCELLED','Cleanup cancelled.',499);
      await timeRequest(request,'server.dispatch',()=>store.dispatch(cleanupLease!));cleanupDispatched=true;
-     let actualCost:number|undefined;
      const cleaned=await timeRequest(request,'server.cleanup',()=>cleanup.clean({text,language,signal:abort.signal,measure:providerTiming(request,'cleanup'),onUsage:usage=>{actualCost=cleanupActualCost(usage,text,language,model);}}),{characters:text.length,model},abort.signal);
-     await timeRequest(request,'server.finish',()=>store.finish(cleanupLease!,actualCost));
+     await timeRequest(request,'server.finish',()=>store.finish(cleanupLease!,actualCost));cleanupLease=undefined;
      result.cleanup={ok:true,result:cleaned};
     } catch(error) {
      const known=error instanceof CleanupError||error instanceof UsageError;
      result.cleanup={ok:false,code:known?error.code:'CLEANUP_FAILED',message:known?error.message:'Cleanup failed. The original transcript is available.'};
     } finally {
-     if(cleanupLease&&!cleanupDispatched)await timeRequest(request,'server.release',()=>store.release(cleanupLease!)).catch(()=>{});
+     if(cleanupLease)await timeRequest(request,cleanupDispatched?'server.finish':'server.release',()=>cleanupDispatched?store.finish(cleanupLease!,actualCost):store.release(cleanupLease!)).catch(()=>console.warn(JSON.stringify({event:'cleanup_settlement_failed'})));
     }
    }
    save(owner,combined?'dictation':'stt',id,fingerprint,result);return result;
@@ -144,23 +143,23 @@ export function createHostedServer(options:HostedOptions){
   const owner=owners.get(request)!,model=cleanup.model;
   const fingerprint=createHash('sha256').update(practice?'practice:':'').update(CLEANUP_PROMPT_VERSION).update(cleanup.fingerprint).update(body.language).update(body.text).digest('hex');
   const abort=new AbortController();const disconnect=()=>{if(!reply.raw.writableEnded){cancelRequestTiming(request);abort.abort();}};
-  let lease:UsageLease|undefined,dispatched=false,entered=false;
+  let lease:UsageLease|undefined,dispatched=false,entered=false,settled=false,actualCost:number|undefined;
   try{
    if(!(await timeRequest(request,'server.eligibility',()=>store.snapshot(owner))).enabled)throw new UsageError('AUTH_REQUIRED','Verify your email before using cloud dictation.',403);
    const previous=cached(owner,'cleanup',id,fingerprint);if(previous){markCached(request);return previous;}
-   if(active>=2)throw new UsageError('BUSY','The service is processing other recordings. Please try shortly.');active++;entered=true;
+   if(active>=2)throw new UsageError('SERVICE_BUSY','The service is busy. Please try again shortly.');active++;entered=true;
    request.raw.once('aborted',disconnect);reply.raw.once('close',disconnect);
    // UTF-8 byte count conservatively bounds text tokens; output includes the model's thinking budget.
    const reservedCost=cleanupReservationCost(body.text,body.language,model);
    if(practice && (body.text.length>3000 || !store.reservePractice))throw new UsageError('PRACTICE_UNAVAILABLE','This practice request cannot be processed.',400);
    lease=await timeRequest(request,'server.reserve',()=>practice?store.reservePractice!(owner,id,'cleanup',fingerprint,0,reservedCost):store.reserve(owner,id,'cleanup',fingerprint,0,reservedCost));
    if(abort.signal.aborted)throw new AudioError('CANCELLED','Cleanup cancelled.',499);
-   await timeRequest(request,'server.dispatch',()=>store.dispatch(lease!));dispatched=true;let actualCost:number|undefined;
+   await timeRequest(request,'server.dispatch',()=>store.dispatch(lease!));dispatched=true;
    const text=body.text, language=body.language;
    const result=await timeRequest(request,'server.cleanup',()=>cleanup.clean({text,language,signal:abort.signal,measure:providerTiming(request,'cleanup'),onUsage:usage=>{actualCost=cleanupActualCost(usage,text,language,model);}}),{characters:text.length,model},abort.signal);
-   await timeRequest(request,'server.finish',()=>store.finish(lease!,actualCost));save(owner,'cleanup',id,fingerprint,result);return result;
+   await timeRequest(request,'server.finish',()=>store.finish(lease!,actualCost));settled=true;save(owner,'cleanup',id,fingerprint,result);return result;
   }catch(error){return failure(error,reply);}finally{
-   if(lease&&!dispatched)await timeRequest(request,'server.release',()=>store.release(lease!)).catch(()=>{});
+   if(lease&&!settled)await timeRequest(request,dispatched?'server.finish':'server.release',()=>dispatched?store.finish(lease!,actualCost):store.release(lease!)).catch(()=>console.warn(JSON.stringify({event:'cleanup_settlement_failed'})));
    if(entered)active--;request.raw.removeListener('aborted',disconnect);reply.raw.removeListener('close',disconnect);
   }
  });

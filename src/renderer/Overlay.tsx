@@ -1,4 +1,6 @@
 import { shortcutLabel } from '../shared/shortcut-label';
+import { OverlayLanguage } from './OverlayLanguage';
+import { useOverlayHitRegions } from './overlay-hit';
 import { recordingNotice, type OverlayNotice } from '../shared/overlay-notice';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, Check, Copy, GripVertical, LoaderCircle, Mic, X } from 'lucide-react';
@@ -8,8 +10,20 @@ import { INITIAL_WINDOWS_STATE, type WindowsState } from '../shared/windows';
 import { syncOverlayTheme } from './overlay-theme';
 import { DEFAULT_DOCK, type DockState } from '../shared/overlay-dock';
 export function Overlay() {
+  useOverlayHitRegions();
   useEffect(syncOverlayTheme,[]);
   const [expanded, setExpanded] = useState(false);
+  const [languageOpen, setLanguageOpen] = useState(false);
+  const [languagePresent, setLanguagePresent] = useState(false);
+  const changeLanguageOpen = useCallback((open: boolean) => setLanguageOpen(open), []);
+  useEffect(() => {
+    if (languageOpen) { setLanguagePresent(true); return; }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setLanguagePresent(false); return; }
+    // Keep the menu and native window space until its 160ms exit has finished.
+    const timer = window.setTimeout(() => setLanguagePresent(false), 180);
+    return () => window.clearTimeout(timer);
+  }, [languageOpen]);
+  const languageVisible = languageOpen || languagePresent;
   const [dock, setDock] = useState<DockState>(DEFAULT_DOCK);
   useEffect(() => {
     let active = true, received = false, wasDragging = false;
@@ -26,6 +40,22 @@ export function Overlay() {
   const [state, setState] = useState<WindowsState>(INITIAL_WINDOWS_STATE);
   const [audio, setAudio] = useState<RecordingState>(INITIAL_RECORDING_STATE);
   const [speech, setSpeech] = useState<TranscriptionStatus>({ phase: 'idle', message: '' });
+  const [allowanceClock,setAllowanceClock]=useState(()=>Date.now());
+  const [dismissedAllowance,setDismissedAllowance]=useState<string|null>(null);
+  const [allowance, setAllowance] = useState<OverlayNotice|null>(null);
+  useEffect(()=>{
+    let alive=true,received=false;
+    const release=window.sargosh?.onAllowanceWarning?.(value=>{received=true;if(alive)setAllowance(value);});
+    void window.sargosh?.allowanceWarning?.().then(value=>{if(alive&&!received)setAllowance(value);}).catch(()=>{});
+    return()=>{alive=false;release?.();};
+  },[]);
+  const allowanceBlocked=Boolean(allowance?.id.split('|').some(id=>id.endsWith(':reached')&&Date.parse(id.match(/\d{4}-\d{2}-\d{2}T[^|]+?(?=:reached)/)?.[0]??'')>allowanceClock));
+  useEffect(()=>{
+    const resets=(allowance?.id.match(/\d{4}-\d{2}-\d{2}T[^|]+?(?=:reached)/g)??[]).map(Date.parse).filter(time=>time>Date.now());
+    if(!resets.length)return;
+    const timer=window.setTimeout(()=>setAllowanceClock(Date.now()),Math.min(2147483647,Math.min(...resets)-Date.now()+1));
+    return()=>window.clearTimeout(timer);
+  },[allowance?.id,allowanceClock]);
   const [error, setError] = useState('');
   const [dismissed, setDismissed] = useState<string | null>(null);
   const noticeElement = useRef<HTMLDivElement>(null);
@@ -57,17 +87,21 @@ export function Overlay() {
   const audioActive = recordingBusy(audio);
   const preparing = audio.phase === 'finishing' || cloudActive;
   const active = state.enabled && ['pending', 'listening'].includes(state.phase);
-  const notice = error ? { id: 'control:' + error, kind: 'error' as const, title: 'Control unavailable', message: error } : recordingNotice(audio, speech);
+  useEffect(() => { if (active || audioActive || cloudActive || dock.dragging) setLanguageOpen(false); }, [active, audioActive, cloudActive, dock.dragging]);
+  const primaryNotice=recordingNotice(audio,speech);
+  const idleAllowance=!active&&!audioActive&&!cloudActive&&allowance?.id!==dismissedAllowance?allowance:null;
+  const attemptedAllowance=idleAllowance?.id.startsWith('allowance:attempt:')?idleAllowance:null;
+  const notice = error ? { id: 'control:' + error, kind: 'error' as const, title: 'Control unavailable', message: error } : attemptedAllowance??primaryNotice??idleAllowance;
   const visibleNotice = notice && notice.id !== dismissed ? notice : null;
   useEffect(() => { if (!notice) setDismissed(null); }, [notice?.id]);
   useEffect(() => {
     const element = noticeElement.current;
-    const resize = () => { void window.sargosh?.resizeOverlay?.(element ? Math.min(400, Math.max(120, Math.ceil(element.getBoundingClientRect().height + 80))) : 120).catch(() => {}); };
+    const resize = () => { void window.sargosh?.resizeOverlay?.(Math.max(languageVisible ? 230 : 120, element ? Math.min(400, Math.ceil(element.getBoundingClientRect().height + 80)) : 120)).catch(() => {}); };
     resize();
     if (!element) return;
     const observer = new ResizeObserver(resize); observer.observe(element);
     return () => observer.disconnect();
-  }, [visibleNotice?.id, dock.position]);
+  }, [visibleNotice?.id, dock.position, languageVisible]);
   async function recordingAction(value: 'cancel' | 'finish') {
     setError('');
     try {
@@ -81,8 +115,8 @@ export function Overlay() {
     catch { setError('Control unavailable. Quit Sargosh from the tray and reopen it.'); }
   }
   return <div className="overlay-stage" data-dock={dock.position} data-dragging={dock.dragging}>
-    {visibleNotice && <div ref={noticeElement} className="overlay-notice-wrap"><NoticeCard key={visibleNotice.id} notice={visibleNotice} onDismiss={() => { setDismissed(visibleNotice.id); setError(''); }} /></div>}
-    <div className={(expanded || active || audioActive || cloudActive ? 'overlay-pill expanded' : 'overlay-pill') + (audioActive || cloudActive ? ' recording-active' : active ? ' input-test-active' : '')} onMouseEnter={() => setExpanded(true)} onMouseLeave={() => { if (!drag.current) setExpanded(false); }}>
+    {visibleNotice && <div ref={noticeElement} className="overlay-notice-wrap" inert={languageVisible} aria-hidden={languageVisible} style={{ visibility: languageVisible ? 'hidden' : undefined }}><NoticeCard key={visibleNotice.id} notice={visibleNotice} onDismiss={() => { setDismissed(visibleNotice.id); setError(''); if(visibleNotice.id===allowance?.id)setDismissedAllowance(visibleNotice.id);  }} /></div>}
+    <div className={(expanded || languageVisible || active || audioActive || cloudActive ? 'overlay-pill expanded' : 'overlay-pill') + (audioActive || cloudActive ? ' recording-active' : active ? ' input-test-active' : '')} onMouseEnter={() => setExpanded(true)} onMouseLeave={() => { if (!drag.current) setExpanded(false); }}>
       {preparing ? <div className="overlay-preparing" role="status" aria-label="Preparing text">
         <span className="overlay-wave" aria-hidden="true">{[0,1,2,3,4,5,6].map(index => <i key={index} style={{ height: '3px' }} />)}</span>
         <LoaderCircle className="overlay-spinner" size={16} aria-hidden="true" />
@@ -94,8 +128,8 @@ export function Overlay() {
         <button className="overlay-mic" aria-label="Cancel input test session" data-tooltip="Cancel" onClick={() => void action('cancel')}><X size={15} /></button>
         <span className="overlay-test-label" data-tooltip="Input tracking only. No audio is recorded.">{state.phase === 'pending' ? 'Starting test' : state.mode === 'hold' ? 'Hold test' : 'Input test'}</span>
         {state.mode === 'hands-free' && <button className="overlay-mic" aria-label="Finish input test session" data-tooltip="Finish input test" onClick={() => void action('finish')}><Check size={15} /></button>}
-      </> : expanded ? <>
-        <button className="overlay-grip" aria-label="Move dictation control" data-tooltip="" onPointerDown={event => {
+      </> : expanded || languageVisible ? <>
+        <button className="overlay-grip" aria-label="Move dictation control" data-tooltip={languageVisible ? '' : 'Drag to move'} onPointerDown={event => {
           if (event.button !== 0) return;
           const pill = event.currentTarget.closest('.overlay-pill')?.getBoundingClientRect();
           if (!pill || !window.sargosh?.overlayDrag) return;
@@ -103,8 +137,8 @@ export function Overlay() {
           event.currentTarget.setPointerCapture(event.pointerId);
           void window.sargosh.overlayDrag('start', { x: pill.x, y: pill.y, width: pill.width, height: pill.height }, window.matchMedia('(prefers-reduced-motion: reduce)').matches).catch(stopDrag);
         }} onPointerUp={stopDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}><GripVertical size={15} /></button>
-        <button className="overlay-mic" aria-label={state.enabled ? state.purpose === 'recording' ? 'Start hands-free recording' : 'Start hands-free input test' : 'Open Sargosh to set up dictation'} data-tooltip="" onClick={() => state.enabled ? void action('start-hands-free') : void window.sargosh?.openMain()}><Mic size={19} /></button>
-        <span className="overlay-tooltip">{state.enabled ? (state.purpose === 'recording' ? 'Dictate - ' : 'Input test - ') + shortcutLabel(state.shortcut) : 'Set up dictation in Sargosh'}</span>
+        <span className="overlay-mic-hint" data-tooltip-tone={allowanceBlocked && state.purpose==='recording' ? 'danger' : undefined} data-tooltip={languageVisible ? '' : allowanceBlocked && state.purpose==='recording' ? 'Allowance exhausted. View Usage in Sargosh.' : ''}><button className="overlay-mic" disabled={allowanceBlocked && state.purpose==='recording'} aria-label={allowanceBlocked && state.purpose==='recording' ? 'Allowance reached' : state.enabled ? state.purpose === 'recording' ? 'Start hands-free recording' : 'Start hands-free input test' : 'Open Sargosh to set up dictation'} data-tooltip={languageVisible ? '' : allowanceBlocked && state.purpose==='recording' ? 'Allowance exhausted. View Usage in Sargosh.' : state.enabled ? (state.purpose === 'recording' ? 'Dictate - ' : 'Input test - ') + shortcutLabel(state.shortcut) : 'Set up dictation in Sargosh'} onClick={() => state.enabled ? void action('start-hands-free') : void window.sargosh?.openMain()}><Mic size={19} /></button></span>
+        {state.enabled && <OverlayLanguage open={languageOpen} onOpen={changeLanguageOpen} onError={message => { setError(message); setLanguageOpen(false); }} />}
       </> : <span className="idle-line" aria-hidden="true" />}
     </div>
   </div>;

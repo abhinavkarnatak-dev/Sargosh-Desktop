@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act, createElement } from 'react';
+import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { App } from '../src/renderer/App';
 import { EMPTY_SNAPSHOT } from '../src/shared/types';
@@ -9,6 +9,9 @@ vi.mock('../src/renderer/DictationGuide',()=>({DictationGuide:()=>createElement(
 vi.mock('../src/renderer/Onboarding',()=>({Onboarding:()=>createElement('div',null,'First-time setup tutorial')}));
 vi.mock('../src/renderer/HistoryList',()=>({HistoryList:()=>createElement('div',null,'Saved history')}));
 vi.mock('../src/renderer/SettingsDialog',()=>({SettingsDialog:()=>null}));
+vi.mock('../src/renderer/AllowanceWarning',()=>({AllowanceWarning:()=>null}));
+// This suite exercises account gates, not native Web Animation cancellation.
+vi.mock('../src/renderer/WaveHeading',()=>({WaveHeading:({children}:{children:ReactNode})=>createElement('h1',null,children)}));
 vi.mock('../src/renderer/audio/runtime',()=>({setRecordingPreferences:()=>{}}));
 let root:Root;let host:HTMLDivElement;let state:AuthState;const listeners=new Set<(state:AuthState)=>void>();
 const save=vi.fn();const snapshot=vi.fn();const signOut=vi.fn();

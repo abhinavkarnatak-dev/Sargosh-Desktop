@@ -1,6 +1,6 @@
 /* Dock layout only; recording actions remain owned by the existing overlay. */
 .overlay-stage[data-dock]{position:relative;height:100vh;overflow:visible}
-.overlay-stage[data-dock] .overlay-pill{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);width:38px;height:38px;border-radius:50%;transition:width .18s ease,height .18s ease,border-radius .18s ease;box-shadow:0 4px 18px #0002}
+.overlay-stage[data-dock] .overlay-pill{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);width:38px;height:38px;border-radius:19px;transition:width .18s ease,height .18s ease,border-radius .18s ease;box-shadow:0 4px 18px #0002}
 .overlay-stage[data-dock] .idle-line{width:6px;height:6px;border-radius:50%}
 .overlay-stage[data-dock] .overlay-pill.expanded{width:88px;height:38px;border-radius:22px}
 .overlay-stage[data-dock] .overlay-pill.recording-active,.overlay-stage[data-dock] .overlay-pill.input-test-active{width:140px;height:38px}
@@ -26,3 +26,25 @@
 @keyframes overlay-notice-exit{from{opacity:1;transform:translate(0,0)}to{opacity:0;transform:translate(var(--notice-exit-x,0px),var(--notice-exit-y,16px))}}
 @media(prefers-reduced-motion:reduce){.overlay-notice[data-closing=true]{animation:none}}
 @media(prefers-reduced-motion:reduce){.overlay-stage[data-dock] .overlay-pill{transition:none}}
+
+/* A compact language control; menus always open toward the usable screen. */
+.overlay-stage[data-dock] .overlay-pill.expanded:has(.overlay-language){width:118px}
+.overlay-stage[data-dock=left] .overlay-pill.expanded:has(.overlay-language),.overlay-stage[data-dock=right] .overlay-pill.expanded:has(.overlay-language){width:38px;height:112px}
+.overlay-language{display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.overlay-language-trigger{width:28px;height:28px;padding:0;border-radius:50%;display:grid;place-items:center;background:transparent;color:var(--accent);font-size:12px;font-weight:600;line-height:1;cursor:pointer}
+.overlay-language-trigger:hover,.overlay-language-trigger[aria-expanded=true]{background:var(--accent-soft)}
+.overlay-language-trigger:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.overlay-language-menu{position:absolute;z-index:5;bottom:50px;left:50%;width:180px;padding:6px;border:1px solid var(--border);border-radius:15px;background:var(--surface);color:var(--text);box-shadow:0 8px 24px #0002;opacity:0;visibility:hidden;pointer-events:none;transform:translate(-50%,6px);transition:opacity .16s ease,transform .16s ease,visibility .16s}
+.overlay-language-menu[data-open=true]{opacity:1;visibility:visible;pointer-events:auto;transform:translate(-50%,0)}
+.overlay-language-menu button{display:flex;align-items:center;gap:10px;width:100%;min-height:36px;padding:7px 9px;border-radius:9px;color:var(--text);background:transparent;font-size:12px;text-align:left;cursor:pointer}
+.overlay-language-menu button:hover,.overlay-language-menu button:focus-visible{background:var(--panel-hover);outline:none}
+.overlay-language-menu button[aria-checked=true]{background:var(--accent-soft)}
+.overlay-language-menu button>span:nth-child(2){flex:1}
+.overlay-language-mark{display:grid;place-items:center;width:24px;flex-shrink:0;color:var(--accent);font-size:12px;font-weight:600}
+.overlay-stage[data-dock=left] .overlay-language-menu{left:50px;bottom:auto;top:50%;transform:translate(-6px,-50%)}
+.overlay-stage[data-dock=right] .overlay-language-menu{left:auto;right:50px;bottom:auto;top:50%;transform:translate(6px,-50%)}
+.overlay-stage[data-dock=left] .overlay-language-menu[data-open=true],.overlay-stage[data-dock=right] .overlay-language-menu[data-open=true]{transform:translate(0,-50%)}
+@media(prefers-reduced-motion:reduce){.overlay-language-menu{transition:none}}
+
+.overlay-mic-hint{display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.overlay-mic-hint>.overlay-mic:disabled{pointer-events:none}

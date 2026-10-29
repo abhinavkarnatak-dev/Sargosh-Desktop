@@ -1,9 +1,20 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 const locks = new Map<HTMLElement, { count: number; value: string; priority: string }>();
+const modalLayers: HTMLDialogElement[] = [];
+const layerListeners = new Set<() => void>();
+const subscribeLayer = (listener: () => void) => { layerListeners.add(listener); return () => { layerListeners.delete(listener); }; };
+const currentLayer = () => modalLayers.at(-1) ?? null;
+export const useModalLayer = () => useSyncExternalStore(subscribeLayer, currentLayer);
+function removeLayer(element: HTMLDialogElement) {
+  const index = modalLayers.indexOf(element); if (index >= 0) modalLayers.splice(index, 1);
+  for (const listener of layerListeners) listener();
+}
 export function useModalDialog(ref: RefObject<HTMLDialogElement | null>) {
   useEffect(() => {
     const element = ref.current; if (!element) return;
     element.showModal();
+    modalLayers.push(element);
+    for (const listener of layerListeners) listener();
     const nodes = [document.documentElement, document.body, ...document.querySelectorAll<HTMLElement>('.main-scroll')];
     for (const node of nodes) {
       const current = locks.get(node);
@@ -12,6 +23,7 @@ export function useModalDialog(ref: RefObject<HTMLDialogElement | null>) {
     }
     return () => {
       element.close();
+      removeLayer(element);
       for (const node of nodes) {
         const current = locks.get(node); if (!current || --current.count > 0) continue;
         if (current.value) node.style.setProperty('overflow', current.value, current.priority); else node.style.removeProperty('overflow');

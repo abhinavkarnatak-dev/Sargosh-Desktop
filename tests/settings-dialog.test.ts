@@ -4,13 +4,15 @@ import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { SettingsDialog } from '../src/renderer/SettingsDialog';
 import { DEFAULT_PREFERENCES } from '../src/shared/types';
+const speech = vi.hoisted(() => ({ phase: 'idle', language: 'en' as 'en' | 'hi' | 'multi' }));
 vi.mock('../src/renderer/audio/runtime', () => ({
-  useRecording: () => ({ phase: 'idle' }), useTranscription: () => ({ phase: 'idle', language: 'en' }),
+  useRecording: () => ({ phase: 'idle' }), useTranscription: () => speech,
   useCleanup: () => ({ phase: 'idle' }), transcription: { configure: vi.fn() }
 }));
 let root: Root; let host: HTMLDivElement;
 const onClose = vi.fn();
 beforeEach(() => {
+  speech.language = 'en';
   vi.useFakeTimers();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); onClose.mockReset();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -62,7 +64,7 @@ it('keeps Escape and the close button working without duplicate dismissal', asyn
 });
 
 it('orders themes System, Dark, Light and shows the release version',async()=>{
- await render();expect(Array.from(host.querySelectorAll('.theme-picker button')).map(button=>button.textContent)).toEqual(['System','Dark','Light']);expect(host.querySelector('.settings-version')?.textContent).toBe('Sargosh 1.0.2');
+ await render();expect(Array.from(host.querySelectorAll('.theme-picker button')).map(button=>button.textContent)).toEqual(['System','Dark','Light']);expect(host.querySelector('.settings-version')?.textContent).toBe('Sargosh 1.0.3');
 });
 it('labels language settings without exposing the transcription provider',async()=>{
  await render();
@@ -70,6 +72,14 @@ it('labels language settings without exposing the transcription provider',async(
  expect(view).toBeTruthy();await act(async()=>view!.click());
  expect(host.querySelector('label[for="settings-speech-language"]')?.textContent).toBe('Speech language');
  expect(host.textContent).not.toContain('Deepgram');
+ expect(host.querySelector('#settings-languages .language-hint')?.textContent).toBe('Hinglish uses multilingual recognition.');
+ expect(host.textContent).not.toContain('Roman letters');
+});
+it.each([['en','English'],['hi','Hindi'],['multi','Hinglish']] as const)('shows the selected %s language beneath My languages', async (language,label) => {
+ speech.language=language;await render();
+ const heading=Array.from(host.querySelectorAll('strong')).find(node=>node.textContent==='My languages')!;
+ expect(heading.closest('.setting-row')?.querySelector('p')?.textContent).toBe(label);
+ expect(host.textContent).not.toContain('Languages used for speech recognition.');
 });
 
 it('closes immediately when reduced motion is preferred',async()=>{

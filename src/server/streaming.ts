@@ -31,7 +31,7 @@ export function installStreaming(server: FastifyInstance, options: StreamOptions
     if(url.pathname!=='/v1/stream'&&!practice){reject(404,'STREAM_UNSUPPORTED','Live dictation is not available on this backend.');return;}
     if(!options.enabled || !options.apiKey || (options.store && (!options.store.reserveStream || !options.store.finishStream))){reject(501,'STREAM_UNSUPPORTED','Live dictation is not enabled on this backend.');return;}
     if(practice&&(!options.store?.reservePracticeStream||!options.store.reservePractice)){reject(501,'STREAM_UNSUPPORTED','Live practice is not enabled on this backend.');return;}
-    if(pending>=2){reject(429,'BUSY','The service is processing other recordings.');return;}
+    if(pending>=2){reject(429,'SERVICE_BUSY','The service is busy. Please try again shortly.');return;}
     const id=url.searchParams.get('id'),language=url.searchParams.get('language'),clean=url.searchParams.get('cleanup');
     if(!isRequestId(id)||!isSpeechLanguage(language)||!['0','1'].includes(clean??'')||[...url.searchParams.keys()].some(x=>!['id','language','cleanup'].includes(x))){reject(400,'INVALID_REQUEST','Invalid live request.');return;}
     pending++;
@@ -122,7 +122,7 @@ export async function serveStream(ws:WebSocket,owner:string,id:string,language:i
         await settle();
         if(abort.signal.aborted)return;
         if(combined && transcript.text.trim()){
-          let cleanLease:UsageLease|undefined,cleanDispatched=false;
+          let cleanLease:UsageLease|undefined,cleanDispatched=false,actual:number|undefined;
           try {
             const text=transcript.text,model=cleanup.model;
             if(text.length>(practice?3000:MAX_CLEANUP_CHARS))throw new CleanupError('CLEANUP_INPUT','The transcript exceeds the cleanup limit.',400);
@@ -130,12 +130,11 @@ export async function serveStream(ws:WebSocket,owner:string,id:string,language:i
             if(store)cleanLease=await trace.measure('server.reserve',()=>practice?store.reservePractice!(owner,id,'cleanup',fp,0,cleanupReservationCost(text,language,model)):store.reserve(owner,id,'cleanup',fp,0,cleanupReservationCost(text,language,model)));
             if(abort.signal.aborted)throw new CleanupError('CANCELLED','Dictation cancelled.',499);
             if(cleanLease){await trace.measure('server.dispatch',()=>store!.dispatch(cleanLease!));cleanDispatched=true;}
-            let actual:number|undefined;
             const result=await trace.measure('server.cleanup',()=>cleanup.clean({text,language,signal:abort.signal,measure:(stage,work)=>trace.measure(`provider.cleanup.${stage}`,work),onUsage:usage=>{actual=cleanupActualCost(usage,text,language,model);}}),{characters:text.length,model},abort.signal);
-            if(cleanLease)await trace.measure('server.finish',()=>store!.finish(cleanLease!,actual));
+            if(cleanLease){await trace.measure('server.finish',()=>store!.finish(cleanLease!,actual));cleanLease=undefined;}
             transcript.cleanup={ok:true,result};
           } catch(error){const e=error instanceof CleanupError||error instanceof UsageError?error:new CleanupError('CLEANUP_FAILED','Cleanup failed. The original transcript is available.');transcript.cleanup={ok:false,code:e.code,message:e.message};}
-          finally{if(cleanLease&&!cleanDispatched)await store!.release(cleanLease).catch(()=>{});}
+          finally{if(cleanLease)await trace.measure(cleanDispatched?'server.finish':'server.release',()=>cleanDispatched?store!.finish(cleanLease!,actual):store!.release(cleanLease!)).catch(()=>console.warn(JSON.stringify({event:'cleanup_settlement_failed'})));}
         }
         if(abort.signal.aborted)return;
         send({type:'result',result:transcript});resolveEnd();ws.close(1000);
